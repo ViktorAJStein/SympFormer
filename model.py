@@ -232,7 +232,7 @@ class EtaSchedule(nn.Module):
 
 
 class PresymplecticSoftmaxAttention(nn.Module):
-    '''Explicit 2nd-order presymplectic integrator (variable doubling) for a symmetric softmax kernel.'''
+    '''Explicit 2nd-order presymplectic integrator (variable doubling) using standard causal self-attention projections (Q,K,V). Note: Q and K are not forced equal; symmetry assumptions from the theory are not enforced here.'''
     def __init__(
         self,
         cfg: ModelConfig,
@@ -282,20 +282,42 @@ class PresymplecticSoftmaxAttention(nn.Module):
         self.head_dim = cfg.n_embd // cfg.n_head
         self.scale = 1.0 / math.sqrt(self.head_dim)
 
-    def _kernel_E_z(self, U: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        B, T, nh, hd = U.shape
-        S = torch.einsum("bthd,bshd->bhts", U, U) * self.scale
-        S = S.mean(dim=1)  # (B, T, T)
+        # Standard attention projections (not enforcing Q=K symmetry)
+        self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
+        self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
+        self.attn_drop = nn.Dropout(cfg.dropout)
+        self.resid_drop = nn.Dropout(cfg.dropout)
+
+    def _qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Compute Q,K,V with standard projections.
+        Input x: (B, T, C). Returns q,k,v in (B, nh, T, hd).
+        """
+        B, T, C = x.shape
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(C, dim=2)
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)  # (B, nh, T, hd)
+        k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        return q, k, v
+
+    def _kernel_E_z(self, q: torch.Tensor, k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute E_ij = exp(<q_i, k_j>/sqrt(d)) and z_i = mean_j E_ij.
+        We aggregate heads by averaging the score matrices over heads, yielding a single (B,T,T) kernel.
+        """
+        B, nh, T, hd = q.shape
+        S = (q @ k.transpose(-2, -1)) * self.scale  # (B, nh, T, T)
 
         if self.causal:
-            m = causal_mask(T, U.device)
-            S = S.masked_fill(m.unsqueeze(0), float("-inf"))
+            m = causal_mask(T, q.device)
+            S = S.masked_fill(m.unsqueeze(0).unsqueeze(0), float("-inf"))
+
+        S = S.mean(dim=1)  # (B, T, T)
 
         # clamp for numerical safety
         S = torch.clamp(S, min=-60.0, max=60.0)
         E = torch.exp(S)
         if self.causal:
-            m = causal_mask(T, U.device)
+            m = causal_mask(T, q.device)
             E = E.masked_fill(m.unsqueeze(0), 0.0)
 
         z = E.sum(dim=-1) / float(T)
@@ -306,23 +328,31 @@ class PresymplecticSoftmaxAttention(nn.Module):
         device, dtype = X.device, X.dtype
         lam = self.sched.exp_minus_eta(t, device, dtype)
         p = lam * Pi
-        U = self.ln(X).view(X.shape[0], X.shape[1], self.n_head, self.head_dim)
-        _, z = self._kernel_E_z(U)
+
+        x_ln = self.ln(X)
+        q, k, _ = self._qkv(x_ln)
+        _, z = self._kernel_E_z(q, k)
         return p / z.unsqueeze(-1)
 
     def _force(self, t: float, X: torch.Tensor, Pi: torch.Tensor) -> torch.Tensor:
         device, dtype = X.device, X.dtype
         Lam = self.sched.exp_eta(t, device, dtype)
         lam = self.sched.exp_minus_eta(t, device, dtype)
-        p = lam * Pi
+        p = lam * Pi  # physical momentum
 
-        U = self.ln(X).view(X.shape[0], X.shape[1], self.n_head, self.head_dim)
-        E, z = self._kernel_E_z(U)
+        x_ln = self.ln(X)
+        q, k, v = self._qkv(x_ln)
+        E, z = self._kernel_E_z(q, k)
 
-        a = (p * p).sum(dim=-1)  # (B,T)
+        a = (p * p).sum(dim=-1)  # (B, T)
         s = a / (z * z + self.eps)
-        M = E * (s.unsqueeze(-1) + s.unsqueeze(-2) - 2.0)
-        core = torch.matmul(M, self.ln(X)) / (2.0 * float(X.shape[1]))
+        M = E * (s.unsqueeze(-1) + s.unsqueeze(-2) - 2.0)  # (B, T, T)
+
+        # Use standard V projection as the "values" being aggregated, then output-projection.
+        Bsz, T, C = X.shape
+        v_merge = v.transpose(1, 2).contiguous().view(Bsz, T, C)  # (B, T, C)
+        core = torch.matmul(M, v_merge) / (2.0 * float(T))
+        core = self.resid_drop(self.c_proj(core))
         return Lam * core
 
     def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -481,10 +511,10 @@ class GPTModel(nn.Module):
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
         self.lm_head.weight = self.tok_emb.weight
 
-        # last diagnostics for xi adaptation
-        self.last_rX_max = 0.0
-        self.last_rP_max = 0.0
-        self.last_xi_mean = float(xi)
+        # --- diagnostics for presymp runs (safe defaults for baseline/yurii) ---
+        self.last_xi_mean = float(getattr(cfg, "presymp_xi", 0.0))
+        self.last_rX = 0.0
+        self.last_rP = 0.0
 
         self.apply(self._init_weights)
 
