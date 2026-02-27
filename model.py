@@ -18,6 +18,9 @@ class ModelConfig:
     dropout: float = 0.0
     bias: bool = False
 
+    # Presymp Variant A: use attention-induced velocity for MLP lookahead
+    presymp_mlp_use_attn_vel: bool = False
+
 
 def causal_mask(T: int, device: torch.device) -> torch.Tensor:
     # True where j > i (masked)
@@ -200,29 +203,120 @@ class YuriiFormerLieTrotterBlock(nn.Module):
 class EtaSchedule(nn.Module):
     """Eta schedule used for conformal scaling.
 
-    Default (mu is None): alpha(t)=3/t (Nesterov) => eta(t)=3*log(t/t0).
-    Linear (mu provided): eta(t)=mu*t.
+    We use eta(t)=∫ alpha(s) ds and expose several parameterizations.
 
-    Notes:
-      * t0 is still used as the time-origin in the integrator (t_k = t0 + k*h).
-      * For the default schedule, t0 must be > 0. For the linear schedule, t0 is
-        not used inside eta(t) but is kept for consistency of time indexing.
+    Fixed (learnable=False):
+      * mode='log'    : eta(t)=c_log*log(t/t0) with c_log defaulting to 3.0
+      * mode='linear' : eta(t)=c_lin*t         (set via eta_mu or eta_lin_coef)
+      * mode='loglin' : eta(t)=c_log*log(t/t0) + c_lin*t
+
+    Learnable (learnable=True):
+      * mode='log'    : eta(t)=c_log*log(t/t0), with c_log>0 learned
+      * mode='linear' : eta(t)=c_lin*t,         with c_lin>0 learned
+      * mode='loglin' : eta(t)=c_log*log(t/t0) + c_lin*t, both >0 learned
+
+    Note: we clamp eta(t) to [-eta_clip, eta_clip] before exponentiation.
     """
 
-    def __init__(self, t0: float = 1.0, mu: Optional[float] = None):
+    def __init__(
+        self,
+        t0: float = 1.0,
+        mu: Optional[float] = None,
+        *,
+        log_coef: Optional[float] = None,
+        lin_coef: Optional[float] = None,
+        learnable: bool = False,
+        mode: str = 'log',
+        init: Optional[float] = None,
+        init_log: Optional[float] = None,
+        init_lin: Optional[float] = None,
+        eta_clip: float = 50.0,
+    ):
         super().__init__()
         if t0 <= 0:
-            raise ValueError("t0 must be > 0")
+            raise ValueError('t0 must be > 0')
         self.t0 = float(t0)
-        self.mu = None if mu is None else float(mu)
+        self.learnable = bool(learnable)
+        self.mode = str(mode)
+        self.eta_clip = float(eta_clip)
+
+        if self.mode not in ('log', 'linear', 'loglin'):
+            raise ValueError("eta mode must be one of {'log','linear','loglin'}")
+
+        # Store fixed coefficients (used when learnable=False).
+        # We interpret:
+        #   - log_coef: coefficient of log(t/t0)
+        #   - lin_coef: coefficient of t
+        # For backward compatibility:
+        #   - mu is treated as lin_coef when lin_coef is not provided.
+        if not self.learnable:
+            if self.mode == 'log':
+                self.c_log_const = 3.0 if log_coef is None else float(log_coef)
+                self.c_lin_const = 0.0
+            elif self.mode == 'linear':
+                c_lin = float(mu) if (lin_coef is None and mu is not None) else (0.0 if lin_coef is None else float(lin_coef))
+                self.c_log_const = 0.0
+                self.c_lin_const = c_lin
+            else:  # loglin
+                self.c_log_const = 3.0 if log_coef is None else float(log_coef)
+                if lin_coef is None:
+                    self.c_lin_const = 0.0 if mu is None else float(mu)
+                else:
+                    self.c_lin_const = float(lin_coef)
+
+            self.c_log = None
+            self.c_lin = None
+            return
+
+        # Learnable coefficients (both constrained to be positive via softplus).
+        if self.mode == 'log':
+            c0 = 3.0 if init is None else float(init)
+            if init_log is not None:
+                c0 = float(init_log)
+            self.c_log = ConstrainedScalar(c0, kind='pos')
+            self.c_lin = None
+        elif self.mode == 'linear':
+            mu0 = float(mu) if (init is None and mu is not None) else (0.1 if init is None else float(init))
+            if init_lin is not None:
+                mu0 = float(init_lin)
+            self.c_lin = ConstrainedScalar(mu0, kind='pos')
+            self.c_log = None
+        else:  # loglin
+            c0 = 3.0
+            m0 = 0.0
+            if init is not None:
+                c0 = float(init)
+            if init_log is not None:
+                c0 = float(init_log)
+            if init_lin is not None:
+                m0 = float(init_lin)
+            # Backward compatibility: if user provided mu and no init_lin, use mu as initial linear coefficient
+            if init_lin is None and mu is not None:
+                m0 = float(mu)
+            self.c_log = ConstrainedScalar(c0, kind='pos')
+            self.c_lin = ConstrainedScalar(max(m0, 1e-8), kind='pos')
+
+    def _eta_unclipped(self, t: float, device, dtype) -> torch.Tensor:
+        tt = torch.tensor(t, device=device, dtype=dtype)
+        if self.learnable:
+            if self.mode == 'log':
+                return self.c_log() * torch.log(tt / self.t0)
+            if self.mode == 'linear':
+                return self.c_lin() * tt
+            return self.c_log() * torch.log(tt / self.t0) + self.c_lin() * tt
+
+        if self.mode == 'log':
+            return torch.tensor(self.c_log_const, device=device, dtype=dtype) * torch.log(tt / self.t0)
+        if self.mode == 'linear':
+            return tt * torch.tensor(self.c_lin_const, device=device, dtype=dtype)
+        return (
+            torch.tensor(self.c_log_const, device=device, dtype=dtype) * torch.log(tt / self.t0)
+            + tt * torch.tensor(self.c_lin_const, device=device, dtype=dtype)
+        )
 
     def eta(self, t: float, device, dtype) -> torch.Tensor:
-        if self.mu is None:
-            tt = torch.tensor(t / self.t0, device=device, dtype=dtype)
-            return 3.0 * torch.log(tt)
-        else:
-            tt = torch.tensor(t, device=device, dtype=dtype)
-            return tt * self.mu
+        e = self._eta_unclipped(t, device, dtype)
+        return torch.clamp(e, -self.eta_clip, self.eta_clip)
 
     def exp_eta(self, t: float, device, dtype) -> torch.Tensor:
         return torch.exp(self.eta(t, device, dtype))
@@ -230,6 +324,34 @@ class EtaSchedule(nn.Module):
     def exp_minus_eta(self, t: float, device, dtype) -> torch.Tensor:
         return torch.exp(-self.eta(t, device, dtype))
 
+    def alpha(self, t: float, device, dtype) -> torch.Tensor:
+        """Return alpha(t)=d/dt eta(t) for the supported schedule families."""
+        if t <= 0:
+            t = 1e-8
+        tt = torch.tensor(t, device=device, dtype=dtype)
+
+        if self.learnable:
+            if self.mode == 'log':
+                return self.c_log() / tt
+            if self.mode == 'linear':
+                return self.c_lin().to(device=device, dtype=dtype)
+            return self.c_log() / tt + self.c_lin().to(device=device, dtype=dtype)
+
+        if self.mode == 'log':
+            return torch.tensor(self.c_log_const, device=device, dtype=dtype) / tt
+        if self.mode == 'linear':
+            return torch.tensor(self.c_lin_const, device=device, dtype=dtype)
+        return torch.tensor(self.c_log_const, device=device, dtype=dtype) / tt + torch.tensor(self.c_lin_const, device=device, dtype=dtype)
+
+    def delta_eta(self, t: float, dt: float, device, dtype) -> torch.Tensor:
+        """Compute eta(t+dt)-eta(t), clamped to [-eta_clip, eta_clip].
+
+        Used for exact friction factors exp(-(eta(t+dt)-eta(t))).
+        """
+        e1 = self._eta_unclipped(t + dt, device, dtype)
+        e0 = self._eta_unclipped(t, device, dtype)
+        d = e1 - e0
+        return torch.clamp(d, -self.eta_clip, self.eta_clip)
 
 class PresymplecticSoftmaxAttention(nn.Module):
     '''Explicit 2nd-order presymplectic integrator (variable doubling) using standard causal self-attention projections (Q,K,V). Note: Q and K are not forced equal; symmetry assumptions from the theory are not enforced here.'''
@@ -242,16 +364,26 @@ class PresymplecticSoftmaxAttention(nn.Module):
         xi_adapt: bool = False,
         r_thresh: float = 1e-2,
         r_low: float = 1e-4,
-        xi_mult_up: float = 2.0,
+        xi_mult_up: float = 1.25,
         xi_mult_down: float = 0.5,
         xi_min: float = 1e-4,
         xi_max: float = 100.0,
+        theta_max: float = 1.0,
+        xi_adapt_warmup: int = 10,
         xi_adapt_every: int = 1,
         t0: float = 1.0,
         eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
         eps: float = 1e-8,
         causal: bool = True,
-        use_v_ln: bool = True,
+        presymp_lnp: str = "end",
     ):
         super().__init__()
         self.cfg = cfg
@@ -264,19 +396,31 @@ class PresymplecticSoftmaxAttention(nn.Module):
         self.xi_mult_down = float(xi_mult_down)
         self.xi_min = float(xi_min)
         self.xi_max = float(xi_max)
+        self.theta_max = float(theta_max)
+        self.xi_adapt_warmup = int(max(0, xi_adapt_warmup))
+        # Cap xi so that rotation angle theta=2*xi*h does not exceed theta_max
+        if self.h > 0:
+            xi_cap = self.theta_max / (2.0 * self.h)
+            self.xi = min(self.xi, xi_cap)
+
         self.xi_adapt_every = int(max(1, xi_adapt_every))
         self._xi_adapt_ctr = 0
         # last diagnostics (max over batch)
         self.last_rX = 0.0
         self.last_rP = 0.0
-        self.last_xi = float(xi)
+        # Track the effective xi after any initial capping.
+        self.last_xi = float(self.xi)
         self.last_xi_changed = False
         self.eps = float(eps)
         self.causal = bool(causal)
 
         self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
-        self.ln_v = LayerNorm(cfg.n_embd, bias=cfg.bias) if use_v_ln else nn.Identity()
-        self.sched = EtaSchedule(t0=t0, mu=eta_mu)
+        self.presymp_lnp = str(presymp_lnp)
+        if self.presymp_lnp not in ("none", "end", "each_substep"):
+            raise ValueError(f"presymp_lnp must be one of none|end|each_substep, got {self.presymp_lnp}")
+        # LayerNorm on momentum stream (LNp). Applied either at end of the step or after each substep.
+        self.ln_p = LayerNorm(cfg.n_embd, bias=cfg.bias) if self.presymp_lnp != "none" else nn.Identity()
+        self.sched = EtaSchedule(t0=t0, mu=eta_mu, log_coef=eta_log_coef, lin_coef=eta_lin_coef, learnable=eta_learnable, mode=eta_mode, init=eta_init, init_log=eta_log_init, init_lin=eta_lin_init, eta_clip=eta_clip)
 
         self.n_head = cfg.n_head
         self.head_dim = cfg.n_embd // cfg.n_head
@@ -323,6 +467,17 @@ class PresymplecticSoftmaxAttention(nn.Module):
         z = E.sum(dim=-1) / float(T)
         z = z.clamp_min(self.eps)
         return E, z
+
+    def _apply_lnp(self, P: torch.Tensor) -> torch.Tensor:
+        """Apply LayerNorm to a momentum-like tensor (B,T,C).
+
+        Uses float32 internally for stability (especially under bf16).
+        """
+        if self.presymp_lnp == "none":
+            return P
+        out = self.ln_p(P.float())
+        return out.to(dtype=P.dtype)
+
 
     def _vel(self, t: float, X: torch.Tensor, Pi: torch.Tensor) -> torch.Tensor:
         device, dtype = X.device, X.dtype
@@ -378,6 +533,10 @@ class PresymplecticSoftmaxAttention(nn.Module):
 
         # phi_A^{tau}
         Pi = Pi + tau * self._force(t, X, bar_Pi)
+        if self.presymp_lnp == "each_substep":
+            Pi = self._apply_lnp(Pi)
+        if self.presymp_lnp == "each_substep":
+            Pi = self._apply_lnp(Pi)
         bar_t = bar_t + tau
         bar_X = bar_X + tau * self._vel(t, X, bar_Pi)
 
@@ -385,6 +544,10 @@ class PresymplecticSoftmaxAttention(nn.Module):
         t = t + tau
         X = X + tau * self._vel(bar_t, bar_X, Pi)
         bar_Pi = bar_Pi + tau * self._force(bar_t, bar_X, Pi)
+        if self.presymp_lnp == "each_substep":
+            bar_Pi = self._apply_lnp(bar_Pi)
+        if self.presymp_lnp == "each_substep":
+            bar_Pi = self._apply_lnp(bar_Pi)
 
         # phi_C^{h}
         dX = X - bar_X
@@ -397,6 +560,9 @@ class PresymplecticSoftmaxAttention(nn.Module):
         bar_X_new = 0.5 * (sX - c * dX - s * dPi)
         bar_Pi_new = 0.5 * (sPi + s * dX - c * dPi)
         X, Pi, bar_X, bar_Pi = X_new, Pi_new, bar_X_new, bar_Pi_new
+        if self.presymp_lnp == "each_substep":
+            Pi = self._apply_lnp(Pi)
+            bar_Pi = self._apply_lnp(bar_Pi)
 
         # phi_B^{tau}
         t = t + tau
@@ -411,8 +577,11 @@ class PresymplecticSoftmaxAttention(nn.Module):
         lam_tk1 = self.sched.exp_minus_eta(tk1, device, dtype)
         Pk1_raw = lam_tk1 * Pi
         bar_Pk1_raw = lam_tk1 * bar_Pi
-        Pk1 = self.ln_v(Pk1_raw)
-        bar_Pk1 = self.ln_v(bar_Pk1_raw)
+        if self.presymp_lnp in ("end", "each_substep"):
+            Pk1 = self._apply_lnp(Pk1_raw)
+            bar_Pk1 = self._apply_lnp(bar_Pk1_raw)
+        else:
+            Pk1, bar_Pk1 = Pk1_raw, bar_Pk1_raw
 
         # Data-driven xi tuning based on mismatch of the doubled variables.
         # r_X := ||X - X_bar|| / (||X|| + eps), r_P := ||P - P_bar|| / (||P|| + eps)
@@ -437,10 +606,16 @@ class PresymplecticSoftmaxAttention(nn.Module):
                 self._xi_adapt_ctr += 1
                 xi_old = self.xi
                 self.last_xi_changed = False
-                if (self._xi_adapt_ctr % self.xi_adapt_every) == 0:
+                if (self._xi_adapt_ctr % self.xi_adapt_every) == 0 and (self._xi_adapt_ctr >= self.xi_adapt_warmup):
                     r = max(rX_max, rP_max)
+                    # Effective maximum xi: respect both user xi_max and theta_max cap (theta = 2*xi*h).
+                    if self.h > 0:
+                        xi_cap = self.theta_max / (2.0 * self.h)
+                    else:
+                        xi_cap = self.xi_max
+                    xi_max_eff = min(self.xi_max, xi_cap)
                     if r > self.r_thresh:
-                        self.xi = min(self.xi * self.xi_mult_up, self.xi_max)
+                        self.xi = min(self.xi * self.xi_mult_up, xi_max_eff)
                     elif r < self.r_low:
                         self.xi = max(self.xi * self.xi_mult_down, self.xi_min)
                     self.last_xi_changed = (self.xi != xi_old)
@@ -452,16 +627,350 @@ class PresymplecticSoftmaxAttention(nn.Module):
         return X, Pk1
 
 
+class DampedEulerAttention(nn.Module):
+    """Explicit Euler discretization of the damped finite-dimensional system.
 
-class PresympGPTBlock(nn.Module):
-    '''Replace attention with presymplectic step; keep MLP sublayer.'''
+    We integrate
+        \dot X = F(X,P),\quad \dot P = G(X,P) - alpha(t) P
+    by
+        X_{k+1} = X_k + h F(X_k,P_k),
+        P_{k+1} = P_k + h (G(X_k,P_k) - alpha(t_k) P_k).
+
+    This is meant as a simple baseline discretization of the same vector field used
+    inside the presymplectic block (but without any geometric structure preservation).
+    """
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        h: float = 1.0,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        eps: float = 1e-8,
+        causal: bool = True,
+        presymp_lnp: str = "end",
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.h = float(h)
+        self.eps = float(eps)
+        self.causal = bool(causal)
+
+        self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.presymp_lnp = str(presymp_lnp)
+        if self.presymp_lnp not in ("none", "end", "each_substep"):
+            raise ValueError(f"presymp_lnp must be one of none|end|each_substep, got {self.presymp_lnp}")
+        self.ln_p = LayerNorm(cfg.n_embd, bias=cfg.bias) if self.presymp_lnp != "none" else nn.Identity()
+        self.sched = EtaSchedule(t0=t0, mu=eta_mu, log_coef=eta_log_coef, lin_coef=eta_lin_coef, learnable=eta_learnable, mode=eta_mode, init=eta_init, init_log=eta_log_init, init_lin=eta_lin_init, eta_clip=eta_clip)
+
+        assert cfg.n_embd % cfg.n_head == 0
+        self.n_head = cfg.n_head
+        self.head_dim = cfg.n_embd // cfg.n_head
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+
+        self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
+        self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
+        self.attn_drop = nn.Dropout(cfg.dropout)
+        self.resid_drop = nn.Dropout(cfg.dropout)
+
+        # diagnostics for uniform logging
+        self.last_rX = 0.0
+        self.last_rP = 0.0
+        self.last_xi = 0.0
+
+    def _qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        B, T, C = x.shape
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(C, dim=2)
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        return q, k, v
+
+    def _kernel_E_z(self, q: torch.Tensor, k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        B, nh, T, _ = q.shape
+        S = (q @ k.transpose(-2, -1)) * self.scale  # (B, nh, T, T)
+        if self.causal:
+            m = causal_mask(T, q.device)
+            S = S.masked_fill(m.unsqueeze(0).unsqueeze(0), float("-inf"))
+        S = S.mean(dim=1)  # (B,T,T)
+        S = torch.clamp(S, min=-60.0, max=60.0)
+        E = torch.exp(S)
+        if self.causal:
+            m = causal_mask(T, q.device)
+            E = E.masked_fill(m.unsqueeze(0), 0.0)
+        z = E.sum(dim=-1) / float(T)
+        z = z.clamp_min(self.eps)
+        return E, z
+
+    def _apply_lnp(self, P: torch.Tensor) -> torch.Tensor:
+        if self.presymp_lnp == "none":
+            return P
+        out = self.ln_p(P.float())
+        return out.to(dtype=P.dtype)
+
+
+    def _F(self, X: torch.Tensor, P: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return (F, z, v_merge) at (X,P), where F=dot X and z is the row normalizer."""
+        x_ln = self.ln(X)
+        q, k, v = self._qkv(x_ln)
+        _, z = self._kernel_E_z(q, k)
+        B, T, C = X.shape
+        v_merge = v.transpose(1, 2).contiguous().view(B, T, C)
+        Fv = P / z.unsqueeze(-1)
+        return Fv, z, v_merge
+
+    def _G(self, X: torch.Tensor, P: torch.Tensor, z: torch.Tensor, v_merge: torch.Tensor) -> torch.Tensor:
+        """Return conservative force term G=dot P + alpha P (i.e. without damping)."""
+        x_ln = self.ln(X)
+        q, k, _ = self._qkv(x_ln)
+        E, _ = self._kernel_E_z(q, k)
+        a = (P * P).sum(dim=-1)
+        s = a / (z * z + self.eps)
+        M = E * (s.unsqueeze(-1) + s.unsqueeze(-2) - 2.0)
+        core = torch.matmul(M, v_merge) / (2.0 * float(X.shape[1]))
+        core = self.resid_drop(self.c_proj(core))
+        return core
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        h = self.h
+        tk = self.sched.t0 + float(k) * h
+        device, dtype = Xk.device, Xk.dtype
+
+        Fv, z, v_merge = self._F(Xk, Pk)
+        Gv = self._G(Xk, Pk, z=z, v_merge=v_merge)
+        alpha = self.sched.alpha(tk, device, dtype)
+        Xk1 = Xk + h * Fv
+        Pk1 = Pk + h * (Gv - alpha * Pk)
+        if self.presymp_lnp != "none":
+            Pk1 = self._apply_lnp(Pk1)
+        return Xk1, Pk1
+
+
+class HalfDampStrangAttention(nn.Module):
+    """Half-damping Strang splitting for the damped system.
+
+    One step is
+      P <- sigma^{1/2} P
+      (X,P) <- Psi_h(X,P)   [conservative Hamiltonian step]
+      P <- sigma^{1/2} P
+
+    Here Psi_h is implemented via the *explicit* variable-doubling method for
+    nonseparable Hamiltonians (same map structure as in FJV §6.2), but applied to
+    the conservative vector field (no conformal time-dependence).
+    """
+
     def __init__(
         self,
         cfg: ModelConfig,
         h: float = 1.0,
         xi: float = 1.0,
+        theta_max: float = 1.0,
         t0: float = 1.0,
         eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        eps: float = 1e-8,
+        causal: bool = True,
+        presymp_lnp: str = "end",
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.h = float(h)
+        self.xi = float(xi)
+        self.theta_max = float(theta_max)
+        self.eps = float(eps)
+        self.causal = bool(causal)
+
+        # cap xi by theta_max/(2h)
+        if self.h > 0:
+            self.xi = min(self.xi, self.theta_max / (2.0 * self.h))
+
+        self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.presymp_lnp = str(presymp_lnp)
+        if self.presymp_lnp not in ("none", "end", "each_substep"):
+            raise ValueError(f"presymp_lnp must be one of none|end|each_substep, got {self.presymp_lnp}")
+        self.ln_p = LayerNorm(cfg.n_embd, bias=cfg.bias) if self.presymp_lnp != "none" else nn.Identity()
+        self.sched = EtaSchedule(t0=t0, mu=eta_mu, log_coef=eta_log_coef, lin_coef=eta_lin_coef, learnable=eta_learnable, mode=eta_mode, init=eta_init, init_log=eta_log_init, init_lin=eta_lin_init, eta_clip=eta_clip)
+
+        assert cfg.n_embd % cfg.n_head == 0
+        self.n_head = cfg.n_head
+        self.head_dim = cfg.n_embd // cfg.n_head
+        self.scale = 1.0 / math.sqrt(self.head_dim)
+
+        self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
+        self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
+        self.attn_drop = nn.Dropout(cfg.dropout)
+        self.resid_drop = nn.Dropout(cfg.dropout)
+
+        # diagnostics for uniform logging
+        self.last_rX = 0.0
+        self.last_rP = 0.0
+        self.last_xi = float(self.xi)
+
+    def _qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        B, T, C = x.shape
+        qkv = self.c_attn(x)
+        q, k, v = qkv.split(C, dim=2)
+        q = q.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
+        return q, k, v
+
+    def _kernel_E_z(self, q: torch.Tensor, k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        B, nh, T, _ = q.shape
+        S = (q @ k.transpose(-2, -1)) * self.scale
+        if self.causal:
+            m = causal_mask(T, q.device)
+            S = S.masked_fill(m.unsqueeze(0).unsqueeze(0), float("-inf"))
+        S = S.mean(dim=1)
+        S = torch.clamp(S, min=-60.0, max=60.0)
+        E = torch.exp(S)
+        if self.causal:
+            m = causal_mask(T, q.device)
+            E = E.masked_fill(m.unsqueeze(0), 0.0)
+        z = E.sum(dim=-1) / float(T)
+        z = z.clamp_min(self.eps)
+        return E, z
+
+    def _apply_lnp(self, P: torch.Tensor) -> torch.Tensor:
+        if self.presymp_lnp == "none":
+            return P
+        out = self.ln_p(P.float())
+        return out.to(dtype=P.dtype)
+
+
+    def _velH(self, X: torch.Tensor, P: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return (F, E, z, v_merge) for conservative dynamics."""
+        x_ln = self.ln(X)
+        q, k, v = self._qkv(x_ln)
+        E, z = self._kernel_E_z(q, k)
+        B, T, C = X.shape
+        v_merge = v.transpose(1, 2).contiguous().view(B, T, C)
+        Fv = P / z.unsqueeze(-1)
+        return Fv, E, z, v_merge
+
+    def _forH(self, X: torch.Tensor, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor, v_merge: torch.Tensor) -> torch.Tensor:
+        a = (P * P).sum(dim=-1)
+        s = a / (z * z + self.eps)
+        M = E * (s.unsqueeze(-1) + s.unsqueeze(-2) - 2.0)
+        core = torch.matmul(M, v_merge) / (2.0 * float(X.shape[1]))
+        core = self.resid_drop(self.c_proj(core))
+        return core
+
+    def _conservative_doubling_step(self, X0: torch.Tensor, P0: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Explicit 2nd-order doubling-trick integrator for the conservative part."""
+        h = self.h
+        tau = 0.5 * h
+        theta = 2.0 * self.xi * h
+        c = math.cos(theta)
+        s = math.sin(theta)
+
+        X = X0
+        P = P0
+        bar_X = X0
+        bar_P = P0
+
+        # phi_A^{tau}
+        Fv, E, z, v_merge = self._velH(X, bar_P)
+        P = P + tau * self._forH(X, bar_P, E=E, z=z, v_merge=v_merge)
+        if self.presymp_lnp == "each_substep":
+            P = self._apply_lnp(P)
+        bar_X = bar_X + tau * Fv
+
+        # phi_B^{tau}
+        Fv2, E2, z2, v_merge2 = self._velH(bar_X, P)
+        X = X + tau * Fv2
+        bar_P = bar_P + tau * self._forH(bar_X, P, E=E2, z=z2, v_merge=v_merge2)
+        if self.presymp_lnp == "each_substep":
+            bar_P = self._apply_lnp(bar_P)
+
+        # phi_C^{h}
+        dX = X - bar_X
+        dP = P - bar_P
+        sX = X + bar_X
+        sP = P + bar_P
+        X_new = 0.5 * (sX + c * dX + s * dP)
+        P_new = 0.5 * (sP - s * dX + c * dP)
+        bar_X_new = 0.5 * (sX - c * dX - s * dP)
+        bar_P_new = 0.5 * (sP + s * dX - c * dP)
+        X, P, bar_X, bar_P = X_new, P_new, bar_X_new, bar_P_new
+        if self.presymp_lnp == "each_substep":
+            P = self._apply_lnp(P)
+            bar_P = self._apply_lnp(bar_P)
+
+        # phi_B^{tau}
+        Fv3, E3, z3, v_merge3 = self._velH(bar_X, P)
+        X = X + tau * Fv3
+        bar_P = bar_P + tau * self._forH(bar_X, P, E=E3, z=z3, v_merge=v_merge3)
+        if self.presymp_lnp == "each_substep":
+            bar_P = self._apply_lnp(bar_P)
+
+        # phi_A^{tau}
+        Fv4, E4, z4, v_merge4 = self._velH(X, bar_P)
+        P = P + tau * self._forH(X, bar_P, E=E4, z=z4, v_merge=v_merge4)
+        if self.presymp_lnp == "each_substep":
+            P = self._apply_lnp(P)
+        bar_X = bar_X + tau * Fv4
+
+        return X, P
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        h = self.h
+        tk = self.sched.t0 + float(k) * h
+        device, dtype = Xk.device, Xk.dtype
+
+        # exact half damping
+        d_eta = self.sched.delta_eta(tk, 0.5 * h, device, dtype)
+        sigma_half = torch.exp(-d_eta)  # scalar tensor
+        P_half = sigma_half * Pk
+
+        # conservative step
+        X1, P1 = self._conservative_doubling_step(Xk, P_half)
+
+        # exact half damping
+        Pk1 = sigma_half * P1
+        if self.presymp_lnp != "none":
+            Pk1 = self._apply_lnp(Pk1)
+        self.last_xi = float(self.xi)
+        return X1, Pk1
+
+
+
+class PresympGPTBlock(nn.Module):
+    '''Replace attention with presymplectic step; accelerate MLP with a Nesterov-style velocity stream.'''
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        mlp_use_attn_vel: bool = False,
+        attn_scheme: str = "presymp",
+        h: float = 1.0,
+        xi: float = 1.0,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        presymp_lnp: str = "end",
         # xi adaptation options
         xi_adapt: bool = False,
         r_thresh: float = 1e-2,
@@ -470,32 +979,124 @@ class PresympGPTBlock(nn.Module):
         xi_mult_down: float = 0.5,
         xi_min: float = 1e-4,
         xi_max: float = 100.0,
+        theta_max: float = 1.0,
+        xi_adapt_warmup: int = 10,
         xi_adapt_every: int = 1,
     ):
         super().__init__()
-        self.attn = PresymplecticSoftmaxAttention(
-            cfg,
-            h=h,
-            xi=xi,
-            xi_adapt=xi_adapt,
-            r_thresh=r_thresh,
-            r_low=r_low,
-            xi_mult_up=xi_mult_up,
-            xi_mult_down=xi_mult_down,
-            xi_min=xi_min,
-            xi_max=xi_max,
-            xi_adapt_every=xi_adapt_every,
-            t0=t0,
-            eta_mu=eta_mu,
-            use_v_ln=True,
-        )
-        self.ln_2 = LayerNorm(cfg.n_embd, bias=cfg.bias)
-        self.mlp = MLP(cfg)
+        self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
+        attn_scheme = str(attn_scheme)
+        if attn_scheme == "presymp":
+            self.attn = PresymplecticSoftmaxAttention(
+                cfg,
+                h=h,
+                xi=xi,
+                xi_adapt=xi_adapt,
+                r_thresh=r_thresh,
+                r_low=r_low,
+                xi_mult_up=xi_mult_up,
+                xi_mult_down=xi_mult_down,
+                xi_min=xi_min,
+                xi_max=xi_max,
+                theta_max=theta_max,
+                xi_adapt_warmup=xi_adapt_warmup,
+                xi_adapt_every=xi_adapt_every,
+                t0=t0,
+                eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+                eta_mode=eta_mode,
+                eta_init=eta_init,
+                eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
+            )
+        elif attn_scheme == "euler":
+            self.attn = DampedEulerAttention(
+                cfg,
+                h=h,
+                t0=t0,
+                eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+                eta_mode=eta_mode,
+                eta_init=eta_init,
+                eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
+            )
+        elif attn_scheme == "strang":
+            self.attn = HalfDampStrangAttention(
+                cfg,
+                h=h,
+                xi=xi,
+                theta_max=theta_max,
+                t0=t0,
+                eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+                eta_mode=eta_mode,
+                eta_init=eta_init,
+                eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
+            )
+        else:
+            raise ValueError("attn_scheme must be one of {'presymp','euler','strang'}")
 
-    def forward(self, x: torch.Tensor, p: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        # MLP substep (accelerated)
+        self.ln_x_mlp = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.mlp = MLP(cfg)
+        self.ln_v_mlp = LayerNorm(cfg.n_embd, bias=cfg.bias)
+
+        # learned scalars for the MLP Nesterov update
+        self.mu_mlp = ConstrainedScalar(0.9, "unit")
+        self.beta_mlp = ConstrainedScalar(0.9, "unit")
+        self.gamma_mlp = ConstrainedScalar(1.0, "pos")
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        p: torch.Tensor,
+        v: torch.Tensor,
+        k: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # --- Attention step (updates x and its cotangent momentum p) ---
+        x0 = x
         x, p = self.attn.step(x, p, k)
-        x = x + self.mlp(self.ln_2(x))
-        return x, p
+
+        # --- MLP step ---
+        mu = self.mu_mlp()
+        gamma = self.gamma_mlp()
+
+        if self.mlp_use_attn_vel:
+            # Variant A: use attention-induced velocity for MLP lookahead
+            # v_attn ≈ (x_after_attn - x_before_attn)/h
+            h = float(getattr(self.attn, 'h', 1.0))
+            if h == 0.0:
+                h = 1.0
+            v_attn = (x - x0) / h
+            x_in = x + mu * v_attn
+            dx = self.mlp(self.ln_x_mlp(x_in))
+            x = x + gamma * dx
+            # expose the used velocity as v for logging/inspection
+            v = v_attn
+        else:
+            # Default: Nesterov-accelerated MLP velocity stream (learned)
+            beta = self.beta_mlp()
+            x_in = x + mu * v
+            dx = self.mlp(self.ln_x_mlp(x_in))
+            v = beta * v + gamma * dx
+            v = self.ln_v_mlp(v)
+            x = x + v
+
+        return x, p, v
 
 
 class GPTModel(nn.Module):
@@ -511,10 +1112,11 @@ class GPTModel(nn.Module):
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
         self.lm_head.weight = self.tok_emb.weight
 
-        # --- diagnostics for presymp runs (safe defaults for baseline/yurii) ---
-        self.last_xi_mean = float(getattr(cfg, "presymp_xi", 0.0))
-        self.last_rX = 0.0
-        self.last_rP = 0.0
+        # last diagnostics for xi adaptation
+        self.last_rX_max = 0.0
+        self.last_rP_max = 0.0
+        # Baseline model has no presymplectic coupling; keep a safe default.
+        self.last_xi_mean = 0.0
 
         self.apply(self._init_weights)
 
@@ -670,10 +1272,20 @@ class PresympModel(nn.Module):
     def __init__(
         self,
         cfg: ModelConfig,
+        attn_scheme: str = "presymp",
         h: float = 1.0,
         xi: float = 1.0,
         t0: float = 1.0,
         eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        presymp_lnp: str = "end",
         use_v0_init: bool = True,
         # xi adaptation options
         xi_adapt: bool = False,
@@ -683,10 +1295,14 @@ class PresympModel(nn.Module):
         xi_mult_down: float = 0.5,
         xi_min: float = 1e-4,
         xi_max: float = 100.0,
+        theta_max: float = 1.0,
+        xi_adapt_warmup: int = 10,
         xi_adapt_every: int = 1,
+        mlp_use_attn_vel: bool = False,
     ):
         super().__init__()
         self.cfg = cfg
+        self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
         self.use_v0_init = bool(use_v0_init)
         self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
@@ -696,15 +1312,29 @@ class PresympModel(nn.Module):
         # treats them as embeddings with wd=0.1.
         self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        # Separate velocity-init embeddings for the MLP velocity stream (v)
+        self.tok_v0_emb_mlp = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_v0_emb_mlp = nn.Embedding(cfg.block_size, cfg.n_embd)
         self.drop = nn.Dropout(cfg.dropout)
 
         self.blocks = nn.ModuleList([
             PresympGPTBlock(
                 cfg,
+                mlp_use_attn_vel=self.mlp_use_attn_vel,
+                attn_scheme=attn_scheme,
                 h=h,
                 xi=xi,
                 t0=t0,
                 eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+            eta_mode=eta_mode,
+            eta_init=eta_init,
+            eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
                 xi_adapt=xi_adapt,
                 r_thresh=r_thresh,
                 r_low=r_low,
@@ -712,6 +1342,8 @@ class PresympModel(nn.Module):
                 xi_mult_down=xi_mult_down,
                 xi_min=xi_min,
                 xi_max=xi_max,
+            theta_max=theta_max,
+            xi_adapt_warmup=xi_adapt_warmup,
                 xi_adapt_every=xi_adapt_every,
             )
             for _ in range(cfg.n_layer)
@@ -738,16 +1370,25 @@ class PresympModel(nn.Module):
         x = self.drop(x)
 
         if self.use_v0_init:
-            p = self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None, :, :]
-            p = self.drop(p)
+            init_p = self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None, :, :]
+            init_p = self.drop(init_p)
+            p = init_p
+            if self.mlp_use_attn_vel:
+                # Variant A ignores the learned MLP velocity state.
+                v = torch.zeros_like(x)
+            else:
+                init_v = self.tok_v0_emb_mlp(idx) + self.pos_v0_emb_mlp(pos)[None, :, :]
+                init_v = self.drop(init_v)
+                v = init_v
         else:
             p = torch.zeros_like(x)
+            v = torch.zeros_like(x)
         rX_max = 0.0
         rP_max = 0.0
         xi_sum = 0.0
         xi_cnt = 0
         for k, blk in enumerate(self.blocks):
-            x, p = blk(x, p, k)
+            x, p, v = blk(x, p, v, k)
             attn = getattr(blk, 'attn', None)
             if attn is not None and hasattr(attn, 'last_rX'):
                 rX_max = max(rX_max, float(attn.last_rX))

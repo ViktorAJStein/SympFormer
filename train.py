@@ -149,7 +149,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data")
     ap.add_argument("--dataset", type=str, default="tinystories", choices=["tinystories"])
-    ap.add_argument("--arch", type=str, default="yurii_lt", choices=["baseline", "yurii_lt", "presymp"])
+    ap.add_argument(
+        "--arch",
+        type=str,
+        default="yurii_lt",
+        choices=["baseline", "yurii_lt", "presymp", "presymp_euler", "presymp_strang"],
+        help="model architecture / attention discretization",
+    )
 
     # Paper-like defaults (TinyStories small)
     ap.add_argument("--n_layer", type=int, default=12)
@@ -164,17 +170,44 @@ def main():
     ap.add_argument("--presymp_h", type=float, default=1.0)
     ap.add_argument("--presymp_xi", type=float, default=1.0)
     ap.add_argument("--presymp_t0", type=float, default=1.0)
-    ap.add_argument("--eta_mu", type=float, default=None, help="if set, use linear eta(t)=mu*t instead of eta(t)=3*log(t/t0)")
+    ap.add_argument("--eta_mu", type=float, default=None, help="if set (and --eta_learnable is not used), use fixed linear eta(t)=mu*t instead of eta(t)=3*log(t/t0)")
+    ap.add_argument("--eta_learnable", action="store_true", help="make eta schedule coefficient(s) learnable")
+    ap.add_argument(
+        "--eta_mode",
+        type=str,
+        default="log",
+        choices=["log", "linear", "loglin"],
+        help="eta schedule family: log=c_log*log(t/t0); linear=c_lin*t; loglin=c_log*log(t/t0)+c_lin*t",
+    )
+    # Fixed coefficients (when --eta_learnable is NOT set)
+    ap.add_argument("--eta_log_coef", type=float, default=None, help="fixed c_log for log(t/t0) term (eta_mode=log or loglin)")
+    ap.add_argument("--eta_lin_coef", type=float, default=None, help="fixed c_lin for t term (eta_mode=linear or loglin). If unset, falls back to --eta_mu for linear part")
+    # Learnable initializations (when --eta_learnable is set)
+    ap.add_argument("--eta_init", type=float, default=None, help="backward-compatible init: for log/linear; for loglin initializes log coefficient unless --eta_log_init is set")
+    ap.add_argument("--eta_log_init", type=float, default=None, help="initial value for learnable c_log (eta_mode=log or loglin)")
+    ap.add_argument("--eta_lin_init", type=float, default=None, help="initial value for learnable c_lin (eta_mode=linear or loglin)")
+    ap.add_argument("--eta_clip", type=float, default=50.0, help="clamp eta(t) to [-eta_clip, eta_clip] before exponentiation")
 
     # Presymplectic xi adaptation (data-driven)
     ap.add_argument("--presymp_xi_adapt", action="store_true", help="adapt xi online based on r_X and r_P thresholds (breaks exact presymplecticity)")
     ap.add_argument("--presymp_r_thresh", type=float, default=1e-2, help="increase xi if max(r_X,r_P) exceeds this")
     ap.add_argument("--presymp_r_low", type=float, default=1e-4, help="decrease xi if max(r_X,r_P) goes below this")
-    ap.add_argument("--presymp_xi_mult_up", type=float, default=2.0, help="multiplier when increasing xi")
+    ap.add_argument("--presymp_xi_mult_up", type=float, default=1.25, help="multiplier when increasing xi")
     ap.add_argument("--presymp_xi_mult_down", type=float, default=0.5, help="multiplier when decreasing xi")
     ap.add_argument("--presymp_xi_min", type=float, default=1e-4, help="lower bound for xi during adaptation")
-    ap.add_argument("--presymp_xi_max", type=float, default=100.0, help="upper bound for xi during adaptation")
-    ap.add_argument("--presymp_xi_adapt_every", type=int, default=1, help="update xi every N presymp steps")
+    ap.add_argument("--presymp_xi_max", type=float, default=100.0, help="upper bound for xi during adaptation (also capped by theta_max/(2h))")
+    ap.add_argument("--presymp_theta_max", type=float, default=1.0, help="cap the coupling rotation angle theta=2*xi*h to at most theta_max by enforcing xi<=theta_max/(2h)")
+    ap.add_argument("--presymp_xi_adapt_warmup", type=int, default=10, help="do not adapt xi for the first this many presymp steps")
+    ap.add_argument("--presymp_xi_adapt_every", type=int, default=1, help="update xi every N presymp steps (after warmup)")
+    ap.add_argument("--presymp_lnp", type=str, default="end", choices=["none","end","each_substep"], help="LayerNorm on presymplectic attention momentum P/Pi: none|end|each_substep")
+
+    # Variant A: use attention-induced velocity for the MLP lookahead (drop separate MLP velocity dynamics)
+    ap.add_argument(
+        "--presymp_mlp_use_attn_vel",
+        action="store_true",
+        help="Presymp only: use v_attn ≈ (X_after_attn - X_before_attn)/h as the velocity in the MLP lookahead (Variant A).",
+    )
+
 
     # v0 initialization embeddings for momentum variants (YuriiFormer Appendix A.1)
     ap.add_argument(
@@ -267,12 +300,31 @@ def main():
             restart_min_layer=args.yurii_restart_min_layer,
         )
     else:
+        # Presymp family: same overall architecture, different attention discretization
+        if args.arch == "presymp":
+            attn_scheme = "presymp"
+        elif args.arch == "presymp_euler":
+            attn_scheme = "euler"
+        elif args.arch == "presymp_strang":
+            attn_scheme = "strang"
+        else:
+            raise ValueError(f"Unknown arch: {args.arch}")
+
         model = PresympModel(
             mcfg,
+            attn_scheme=attn_scheme,
             h=args.presymp_h,
             xi=args.presymp_xi,
             t0=args.presymp_t0,
             eta_mu=args.eta_mu,
+            eta_log_coef=args.eta_log_coef,
+            eta_lin_coef=args.eta_lin_coef,
+            eta_log_init=args.eta_log_init,
+            eta_lin_init=args.eta_lin_init,
+            eta_learnable=args.eta_learnable,
+            eta_mode=args.eta_mode,
+            eta_init=args.eta_init,
+            eta_clip=args.eta_clip,
             use_v0_init=(not args.no_v0_init),
             xi_adapt=args.presymp_xi_adapt,
             r_thresh=args.presymp_r_thresh,
@@ -281,7 +333,11 @@ def main():
             xi_mult_down=args.presymp_xi_mult_down,
             xi_min=args.presymp_xi_min,
             xi_max=args.presymp_xi_max,
+            theta_max=args.presymp_theta_max,
+            presymp_lnp=args.presymp_lnp,
+            xi_adapt_warmup=args.presymp_xi_adapt_warmup,
             xi_adapt_every=args.presymp_xi_adapt_every,
+            mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
         )
 
     model.to(device)
@@ -354,7 +410,7 @@ def main():
             extra = ""
             if args.arch == "yurii_lt" and args.yurii_restart != "none":
                 extra = f" | restarts {restarts_accum}"
-            if args.arch == "presymp" and hasattr(model, "last_xi_mean"):
+            if args.arch.startswith("presymp") and hasattr(model, "last_xi_mean"):
                 extra += f" | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e}"
             print(
                 f"[{args.arch}] step {step:6d} | loss {loss_accum:.4f} | lr {lr:.2e} | "
