@@ -148,7 +148,7 @@ def estimate_loss(
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data_dir", type=str, default="data")
-    ap.add_argument("--dataset", type=str, default="tinystories", choices=["tinystories"])
+    ap.add_argument("--dataset", type=str, default="tinystories", choices=["tinystories", "openwebtext"])
     ap.add_argument(
         "--arch",
         type=str,
