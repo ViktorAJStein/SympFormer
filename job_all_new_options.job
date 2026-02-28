@@ -1,12 +1,12 @@
 #!/bin/bash --login
-#SBATCH --job-name=1v
+#SBATCH --job-name=saturday
 #SBATCH --mail-type=end
 #SBATCH --mail-user=stein@math.tu-berlin.de
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=48:00:00
-#SBATCH --output=1v.log
+#SBATCH --output=saturday.log
 
 export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -16,7 +16,7 @@ conda activate nicos_stuff
 cd /work/stein/yuriiformer_presymp
 
 DEVICE=cuda
-OUTDIR=1v_${SLURM_JOB_ID}   # avoids mixing old runs
+OUTDIR=saturday${SLURM_JOB_ID}   # avoids mixing old runs
 mkdir -p "${OUTDIR}"
 
 # ---- shared hyperparameters ----
@@ -33,15 +33,15 @@ LOG_INTERVAL=200
 WARMUP_STEPS=150
 
 # presymp extras
-PRESYMP_DAMPING=( --eta_learnable --eta_mode loglin --eta_log_init .3 --eta_lin_init .5 --eta_clip 12 )
+PRESYMP_DAMPING=( --eta_learnable --eta_mode log --eta_log_init 3 --eta_clip 13 )
 PRESYMP_ADAPT=()
 
 # ---- declare (h,xi) ONCE here ----
 PRESYMP_PAIRS=(
   "0.05 0.5"
-  "0.01 10"
-  "0.01 0.5"
-  "0.01 1"
+  "0.01 .1"
+  "0.01 0.05"
+  "0.01 .5"
 )
 
 log() { echo "[$(date -Is)] $*"; }
@@ -54,7 +54,7 @@ COMMON_ARGS=(
   --batch_size "${BATCH_SIZE}" --grad_accum_steps "${GRAD_ACCUM_STEPS}"
   --max_steps "${MAX_STEPS}" --eval_interval "${EVAL_INTERVAL}" --eval_batches "${EVAL_BATCHES}" --log_interval "${LOG_INTERVAL}"
   --warmup_steps "${WARMUP_STEPS}" --device "${DEVICE}" --plot
-  --min_lr_ratio 0.3 --peak_lr 3e-4 --presymp_lnp each_substep
+  --min_lr_ratio 0.3 --peak_lr 3e-4 --presymp_lnp end
 )
 
 run_train() {
@@ -89,30 +89,33 @@ for pair in "${PRESYMP_PAIRS[@]}"; do
 done
 
 # 4) Euler + Strang (use consistent run_name)
-EULER_H="0.1"
-run_train presymp_euler \
-  "${PRESYMP_DAMPING[@]}" \
-  --presymp_h "${EULER_H}" --run_name "h${EULER_H//./p}"
+for pair in "${PRESYMP_PAIRS[@]}"; do
+  read -r h xi <<< "${pair}"
+  tag="$(mk_tag "${h}" "${xi}")"
+  run_train presymp_euler \
+    "${PRESYMP_DAMPING[@]}" \
+    --presymp_h "${h}" --run_name "h${EULER_H//./p}"
 
-STRANG_H="0.1"
-STRANG_XI="5"
-STRANG_TAG="$(mk_tag "${STRANG_H}" "${STRANG_XI}")"
-run_train presymp_strang \
-  "${PRESYMP_DAMPING[@]}" \
-  --presymp_h "${STRANG_H}" --presymp_xi "${STRANG_XI}" --presymp_theta_max 0.5 --run_name "${STRANG_TAG}"
+# Strang sweep over the same (h, xi) grid used for presymp (K-based)
+STRANG_THETA_MAX="0.5"
+for pair in "${PRESYMP_PAIRS[@]}"; do
+  read -r h xi <<< "${pair}"
+  tag="$(mk_tag "${h}" "${xi}")"
+  run_train presymp_strang \
+    "${PRESYMP_DAMPING[@]}" \
+    --presymp_h "${h}" --presymp_xi "${xi}" --presymp_theta_max "${STRANG_THETA_MAX}" --run_name "${tag}"
+done
 
 # ---- plotting: build RUNS/LABELS from the same tags ----
 RUNS=(
   "${OUTDIR}/baseline"
   "${OUTDIR}/yurii_lt"
   "${OUTDIR}/presymp_euler_h0p1"
-  "${OUTDIR}/presymp_strang_${STRANG_TAG}"
 )
 LABELS=(
   "Baseline"
   "YuriiFormer-LT"
   "Presymp Euler (h=${EULER_H})"
-  "Presymp Strang (h=${STRANG_H}, xi=${STRANG_XI})"
 )
 
 for pair in "${PRESYMP_PAIRS[@]}"; do
@@ -120,6 +123,13 @@ for pair in "${PRESYMP_PAIRS[@]}"; do
   tag="$(mk_tag "${h}" "${xi}")"
   RUNS+=( "${OUTDIR}/presymp_${tag}" )
   LABELS+=( "Presymp (K-based) h=${h} xi=${xi}" )
+done
+
+for pair in "${PRESYMP_PAIRS[@]}"; do
+  read -r h xi <<< "${pair}"
+  tag="$(mk_tag "${h}" "${xi}")"
+  RUNS+=( "${OUTDIR}/presymp_strang_${tag}" )
+  LABELS+=( "Presymp Strang h=${h} xi=${xi}" )
 done
 
 run python3 -u plot_compare.py --runs "${RUNS[@]}" --labels "${LABELS[@]}" --out "${OUTDIR}/compare_loss.png"
