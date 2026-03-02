@@ -26,7 +26,7 @@ Set `--max_docs_*` to a positive integer for a quick smoke test.
 
 ## Files
 - `model.py` models/blocks
-- `data.py` deterministic block-epoch token iterator (matches paper's "shift boundaries + reshuffle")
+- `data.py` deterministic block-epoch token iterator (shift boundaries + reshuffle")
 - `train.py` training loop
 - `preprocess_tinystories.py` dataset preprocessing
 
