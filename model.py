@@ -7,6 +7,22 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# ---- helper transforms for constrained scalars ----
+def inv_softplus(y: float) -> float:
+    """Inverse of softplus for y>0."""
+    y = float(y)
+    if y <= 0:
+        return -20.0
+    if y < 20:
+        return math.log(math.expm1(y))
+    return y
+
+def inv_sigmoid(p: float) -> float:
+    """logit(p) for p in (0,1)."""
+    p = float(p)
+    p = min(max(p, 1e-6), 1 - 1e-6)
+    return math.log(p) - math.log(1 - p)
+
 
 @dataclass
 class ModelConfig:
@@ -361,7 +377,7 @@ class PresymplecticSoftmaxAttention(nn.Module):
         h: float = 1.0,
         xi: float = 1.0,
         # Data-driven tuning of xi based on mismatch of doubled variables
-        xi_adapt: bool = False,
+        # xi_adapt: bool = False,
         r_thresh: float = 1e-2,
         r_low: float = 1e-4,
         xi_mult_up: float = 1.25,
@@ -369,8 +385,8 @@ class PresymplecticSoftmaxAttention(nn.Module):
         xi_min: float = 1e-4,
         xi_max: float = 100.0,
         theta_max: float = 1.0,
-        xi_adapt_warmup: int = 10,
-        xi_adapt_every: int = 1,
+        # xi_adapt_warmup: int = 10,
+        # xi_adapt_every: int = 1,
         t0: float = 1.0,
         eta_mu: Optional[float] = None,
         eta_log_coef: Optional[float] = None,
@@ -387,9 +403,13 @@ class PresymplecticSoftmaxAttention(nn.Module):
     ):
         super().__init__()
         self.cfg = cfg
-        self.h = float(h)
-        self.xi = float(xi)
-        self.xi_adapt = bool(xi_adapt)
+
+        # Learned step size and coupling (positive), with smooth theta_max cap for xi:
+        #   h = softplus(theta_h) > 0
+        #   xi = (theta_max/(2h)) * sigmoid(theta_xi_raw)  in (0, theta_max/(2h)) if theta_max>0
+        self.theta_h = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.theta_xi_raw = nn.Parameter(torch.tensor(0.0, dtype=torch.float32))  # initialized below
+        # self.xi_adapt = bool(xi_adapt)
         self.r_thresh = float(r_thresh)
         self.r_low = float(r_low)
         self.xi_mult_up = float(xi_mult_up)
@@ -397,22 +417,29 @@ class PresymplecticSoftmaxAttention(nn.Module):
         self.xi_min = float(xi_min)
         self.xi_max = float(xi_max)
         self.theta_max = float(theta_max)
-        self.xi_adapt_warmup = int(max(0, xi_adapt_warmup))
-        # Cap xi so that rotation angle theta=2*xi*h does not exceed theta_max
-        if self.h > 0:
-            xi_cap = self.theta_max / (2.0 * self.h)
-            self.xi = min(self.xi, xi_cap)
+        # self.xi_adapt_warmup = int(max(0, xi_adapt_warmup))
 
-        self.xi_adapt_every = int(max(1, xi_adapt_every))
-        self._xi_adapt_ctr = 0
+        # initialize theta_xi_raw so that xi(h0)=xi0 (up to cap)
+        h0 = float(h) if float(h) > 0 else 1.0
+        xi0 = float(xi)
+        if self.theta_max > 0:
+            xi_cap0 = self.theta_max / (2.0 * h0)
+            frac = xi0 / max(xi_cap0, 1e-12)
+            self.theta_xi_raw.data = torch.tensor(inv_sigmoid(frac), dtype=torch.float32)
+        else:
+            self.theta_xi_raw.data = torch.tensor(inv_softplus(xi0), dtype=torch.float32)
+
+        # self.xi_adapt_every = int(max(1, xi_adapt_every))
+        # self._xi_adapt_ctr = 0
         # last diagnostics (max over batch)
         self.last_rX = 0.0
         self.last_rP = 0.0
-        # Track the effective xi after any initial capping.
-        self.last_xi = float(self.xi)
-        self.last_xi_changed = False
+        self.last_h = float(F.softplus(self.theta_h).detach().cpu().item())
         self.eps = float(eps)
         self.causal = bool(causal)
+        # Track the effective xi after any initial capping.
+        self.last_xi = float(self.xi(h=torch.tensor(float(h0), dtype=torch.float32)).detach().cpu().item())
+        self.last_xi_changed = False
 
         self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.presymp_lnp = str(presymp_lnp)
@@ -443,6 +470,29 @@ class PresymplecticSoftmaxAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         return q, k, v
+
+    def h(self, device=None, dtype=None):
+        h = F.softplus(self.theta_h)
+        if device is not None or dtype is not None:
+            h = h.to(device=device if device is not None else h.device,
+                     dtype=dtype if dtype is not None else h.dtype)
+        return h
+
+    def xi(self, h, device=None, dtype=None):
+        if not torch.is_tensor(h):
+            h = torch.tensor(float(h), device=device, dtype=dtype)
+        h = h.clamp_min(self.eps)
+        if self.theta_max > 0:
+            xi_max = (self.theta_max / (2.0 * h))
+            xi = xi_max * torch.sigmoid(self.theta_xi_raw)
+        else:
+            xi = F.softplus(self.theta_xi_raw)
+        xi = torch.clamp(xi, min=self.xi_min, max=self.xi_max)
+        if device is not None or dtype is not None:
+            xi = xi.to(device=device if device is not None else xi.device,
+                       dtype=dtype if dtype is not None else xi.dtype)
+        return xi
+
 
     def _kernel_E_z(self, q: torch.Tensor, k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Compute E_ij = exp(<q_i, k_j>/sqrt(d)) and z_i = mean_j E_ij.
@@ -511,13 +561,13 @@ class PresymplecticSoftmaxAttention(nn.Module):
         return Lam * core
 
     def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        h = self.h
+        device, dtype = Xk.device, Xk.dtype
+        h = float(self.h(device=device, dtype=dtype).detach().cpu().item())
         tau = 0.5 * h
         t0 = self.sched.t0
         tk = t0 + float(k) * h
         tk1 = tk + h
 
-        device, dtype = Xk.device, Xk.dtype
         Lam_tk = self.sched.exp_eta(tk, device, dtype)
         Pi = Lam_tk * Pk
 
@@ -527,7 +577,9 @@ class PresymplecticSoftmaxAttention(nn.Module):
         bar_X = Xk
         bar_Pi = Pi
 
-        theta = 2.0 * self.xi * h
+        # coupling (possibly learnable): enforce theta_max via xi(h) reparameterization
+        xi_eff = float(self.xi(h=torch.tensor(h, device=device, dtype=dtype), device=device, dtype=dtype).detach().cpu().item())
+        theta = 2.0 * xi_eff * h
         c = math.cos(theta)
         s = math.sin(theta)
 
@@ -583,55 +635,19 @@ class PresymplecticSoftmaxAttention(nn.Module):
         else:
             Pk1, bar_Pk1 = Pk1_raw, bar_Pk1_raw
 
-        # Data-driven xi tuning based on mismatch of the doubled variables.
-        # r_X := ||X - X_bar|| / (||X|| + eps), r_P := ||P - P_bar|| / (||P|| + eps)
-        if self.training and self.xi_adapt:
-            with torch.no_grad():
-                Bsz = X.shape[0]
-                dX = X - bar_X
-                nX = torch.linalg.vector_norm(X.reshape(Bsz, -1), ord=2, dim=1)
-                ndX = torch.linalg.vector_norm(dX.reshape(Bsz, -1), ord=2, dim=1)
-                rX = ndX / (nX + self.eps)
-
-                dP = Pk1 - bar_Pk1
-                nP = torch.linalg.vector_norm(Pk1.reshape(Bsz, -1), ord=2, dim=1)
-                ndP = torch.linalg.vector_norm(dP.reshape(Bsz, -1), ord=2, dim=1)
-                rP = ndP / (nP + self.eps)
-
-                rX_max = float(rX.max().item())
-                rP_max = float(rP.max().item())
-                self.last_rX = rX_max
-                self.last_rP = rP_max
-
-                self._xi_adapt_ctr += 1
-                xi_old = self.xi
-                self.last_xi_changed = False
-                if (self._xi_adapt_ctr % self.xi_adapt_every) == 0 and (self._xi_adapt_ctr >= self.xi_adapt_warmup):
-                    r = max(rX_max, rP_max)
-                    # Effective maximum xi: respect both user xi_max and theta_max cap (theta = 2*xi*h).
-                    if self.h > 0:
-                        xi_cap = self.theta_max / (2.0 * self.h)
-                    else:
-                        xi_cap = self.xi_max
-                    xi_max_eff = min(self.xi_max, xi_cap)
-                    if r > self.r_thresh:
-                        self.xi = min(self.xi * self.xi_mult_up, xi_max_eff)
-                    elif r < self.r_low:
-                        self.xi = max(self.xi * self.xi_mult_down, self.xi_min)
-                    self.last_xi_changed = (self.xi != xi_old)
-                self.last_xi = float(self.xi)
-        else:
-            self.last_xi = float(self.xi)
-            self.last_xi_changed = False
+        self.last_h = h
+        self.last_xi = float(self.xi(h=torch.tensor(h, dtype=torch.float32)).detach().cpu().item())
+        self.last_xi_changed = False
 
         return X, Pk1
 
 
 class DampedEulerAttention(nn.Module):
-    """Explicit Euler discretization of the damped finite-dimensional system.
+    """
+    Explicit Euler discretization of the damped finite-dimensional system.
 
     We integrate
-        \dot X = F(X,P),\quad \dot P = G(X,P) - alpha(t) P
+        dot X = F(X,P),\quad \dot P = G(X,P) - alpha(t) P
     by
         X_{k+1} = X_k + h F(X_k,P_k),
         P_{k+1} = P_k + h (G(X_k,P_k) - alpha(t_k) P_k).
@@ -660,7 +676,7 @@ class DampedEulerAttention(nn.Module):
     ):
         super().__init__()
         self.cfg = cfg
-        self.h = float(h)
+        self.theta_h = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
         self.eps = float(eps)
         self.causal = bool(causal)
 
@@ -684,6 +700,7 @@ class DampedEulerAttention(nn.Module):
         # diagnostics for uniform logging
         self.last_rX = 0.0
         self.last_rP = 0.0
+        self.last_h = float(F.softplus(self.theta_h).detach().cpu().item())
         self.last_xi = 0.0
 
     def _qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -694,6 +711,14 @@ class DampedEulerAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         return q, k, v
+
+    def h(self, device=None, dtype=None):
+        h = F.softplus(self.theta_h)
+        if device is not None or dtype is not None:
+            h = h.to(device=device if device is not None else h.device,
+                     dtype=dtype if dtype is not None else h.dtype)
+        return h
+
 
     def _kernel_E_z(self, q: torch.Tensor, k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         B, nh, T, _ = q.shape
@@ -716,45 +741,84 @@ class DampedEulerAttention(nn.Module):
             return P
         out = self.ln_p(P.float())
         return out.to(dtype=P.dtype)
-
-
-    def _F(self, X: torch.Tensor, P: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return (F, z, v_merge) at (X,P), where F=dot X and z is the row normalizer."""
+    def _F_E_z_vmerge(self, X: torch.Tensor, P: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Return (F, E, z, v_merge) at (X,P), where F=dot X, E=exp(score), z is row normalizer.
+        # This computes QKV and the kernel once.
         x_ln = self.ln(X)
         q, k, v = self._qkv(x_ln)
-        _, z = self._kernel_E_z(q, k)
+        E, z = self._kernel_E_z(q, k)
         B, T, C = X.shape
         v_merge = v.transpose(1, 2).contiguous().view(B, T, C)
         Fv = P / z.unsqueeze(-1)
-        return Fv, z, v_merge
+        return Fv, E, z, v_merge
 
-    def _G(self, X: torch.Tensor, P: torch.Tensor, z: torch.Tensor, v_merge: torch.Tensor) -> torch.Tensor:
-        """Return conservative force term G=dot P + alpha P (i.e. without damping)."""
-        x_ln = self.ln(X)
-        q, k, _ = self._qkv(x_ln)
-        E, _ = self._kernel_E_z(q, k)
+    def _G_from_cache(self, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor, v_merge: torch.Tensor) -> torch.Tensor:
+        # Conservative force term G (without damping), using cached (E,z,v_merge).
         a = (P * P).sum(dim=-1)
         s = a / (z * z + self.eps)
         M = E * (s.unsqueeze(-1) + s.unsqueeze(-2) - 2.0)
-        core = torch.matmul(M, v_merge) / (2.0 * float(X.shape[1]))
+        core = torch.matmul(M, v_merge) / (2.0 * float(P.shape[1]))
         core = self.resid_drop(self.c_proj(core))
         return core
 
-    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        h = self.h
+    def FG_alpha(self, X: torch.Tensor, P: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Return (F, G, z, alpha) at (X,P) for layer index k.
+        device, dtype = X.device, X.dtype
+        h = self.h().item()
         tk = self.sched.t0 + float(k) * h
-        device, dtype = Xk.device, Xk.dtype
-
-        Fv, z, v_merge = self._F(Xk, Pk)
-        Gv = self._G(Xk, Pk, z=z, v_merge=v_merge)
+        Fv, E, z, v_merge = self._F_E_z_vmerge(X, P)
+        Gv = self._G_from_cache(P, E=E, z=z, v_merge=v_merge)
         alpha = self.sched.alpha(tk, device, dtype)
+        return Fv, Gv, z, alpha
+
+    def rhs(self, X: torch.Tensor, P: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        # Right-hand side of the damped system: (dX, dP) with dP including -alpha P.
+        Fv, Gv, _z, alpha = self.FG_alpha(X, P, k)
+        return Fv, (Gv - alpha * P)
+
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        device, dtype = Xk.device, Xk.dtype
+        # note: we use a scalar h for the schedule evaluation here
+        h = self.h().item()
+        tk = self.sched.t0 + float(k) * h
+
+        Fv, Gv, z, alpha = self.FG_alpha(Xk, Pk, k)
         Xk1 = Xk + h * Fv
         Pk1 = Pk + h * (Gv - alpha * Pk)
         if self.presymp_lnp != "none":
             Pk1 = self._apply_lnp(Pk1)
+        self.last_h = h
         return Xk1, Pk1
 
 
+
+
+class DampedExpEulerAttention(DampedEulerAttention):
+    # Integrating-factor / exponential Euler discretization of the damped system.
+    # Treat damping exactly over one step using sigma = exp(-(eta(t+h)-eta(t))).
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        device, dtype = Xk.device, Xk.dtype
+        h = self.h().item()
+        tk = self.sched.t0 + float(k) * h
+
+        # one oracle call at (Xk,Pk)
+        _Fv, Gv, z, _alpha = self.FG_alpha(Xk, Pk, k)
+
+        d_eta = self.sched.delta_eta(tk, h, device, dtype)
+        sigma = torch.exp(-d_eta)
+        denom = torch.tensor(h if h != 0.0 else 1.0, device=device, dtype=dtype)
+        alpha_eff = d_eta / denom
+        eps = torch.tensor(1e-8, device=device, dtype=dtype)
+        w = torch.where(alpha_eff.abs() > eps, (1.0 - sigma) / alpha_eff, torch.tensor(h, device=device, dtype=dtype))
+
+        Pk1 = sigma * Pk + w * Gv
+        Xk1 = Xk + h * (Pk1 / z.unsqueeze(-1))
+        if self.presymp_lnp != "none":
+            Pk1 = self._apply_lnp(Pk1)
+        self.last_h = h
+        return Xk1, Pk1
 class HalfDampStrangAttention(nn.Module):
     """Half-damping Strang splitting for the damped system.
 
@@ -790,15 +854,21 @@ class HalfDampStrangAttention(nn.Module):
     ):
         super().__init__()
         self.cfg = cfg
-        self.h = float(h)
-        self.xi = float(xi)
+
+        self.theta_h = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.theta_xi_raw = nn.Parameter(torch.tensor(0.0, dtype=torch.float32))
         self.theta_max = float(theta_max)
         self.eps = float(eps)
         self.causal = bool(causal)
 
-        # cap xi by theta_max/(2h)
-        if self.h > 0:
-            self.xi = min(self.xi, self.theta_max / (2.0 * self.h))
+        h0 = float(h) if float(h) > 0 else 1.0
+        xi0 = float(xi)
+        if self.theta_max > 0:
+            xi_cap0 = self.theta_max / (2.0 * h0)
+            frac = xi0 / max(xi_cap0, 1e-12)
+            self.theta_xi_raw.data = torch.tensor(inv_sigmoid(frac), dtype=torch.float32)
+        else:
+            self.theta_xi_raw.data = torch.tensor(inv_softplus(xi0), dtype=torch.float32)
 
         self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.presymp_lnp = str(presymp_lnp)
@@ -820,7 +890,8 @@ class HalfDampStrangAttention(nn.Module):
         # diagnostics for uniform logging
         self.last_rX = 0.0
         self.last_rP = 0.0
-        self.last_xi = float(self.xi)
+        self.last_h = float(F.softplus(self.theta_h).detach().cpu().item())
+        self.last_xi = float(self.xi(h=torch.tensor(float(h0), dtype=torch.float32)).detach().cpu().item())
 
     def _qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         B, T, C = x.shape
@@ -830,6 +901,28 @@ class HalfDampStrangAttention(nn.Module):
         k = k.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         return q, k, v
+
+    def h(self, device=None, dtype=None):
+        h = F.softplus(self.theta_h)
+        if device is not None or dtype is not None:
+            h = h.to(device=device if device is not None else h.device,
+                     dtype=dtype if dtype is not None else h.dtype)
+        return h
+
+    def xi(self, h, device=None, dtype=None):
+        if not torch.is_tensor(h):
+            h = torch.tensor(float(h), device=device, dtype=dtype)
+        h = h.clamp_min(self.eps)
+        if self.theta_max > 0:
+            xi_max = (self.theta_max / (2.0 * h))
+            xi = xi_max * torch.sigmoid(self.theta_xi_raw)
+        else:
+            xi = F.softplus(self.theta_xi_raw)
+        if device is not None or dtype is not None:
+            xi = xi.to(device=device if device is not None else xi.device,
+                       dtype=dtype if dtype is not None else xi.dtype)
+        return xi
+
 
     def _kernel_E_z(self, q: torch.Tensor, k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         B, nh, T, _ = q.shape
@@ -874,9 +967,11 @@ class HalfDampStrangAttention(nn.Module):
 
     def _conservative_doubling_step(self, X0: torch.Tensor, P0: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """Explicit 2nd-order doubling-trick integrator for the conservative part."""
-        h = self.h
+        device, dtype = X0.device, X0.dtype
+        h = float(self.h(device=device, dtype=dtype).detach().cpu().item())
         tau = 0.5 * h
-        theta = 2.0 * self.xi * h
+        xi_eff = float(self.xi(h=torch.tensor(h, device=device, dtype=dtype), device=device, dtype=dtype).detach().cpu().item())
+        theta = 2.0 * xi_eff * h
         c = math.cos(theta)
         s = math.sin(theta)
 
@@ -930,9 +1025,9 @@ class HalfDampStrangAttention(nn.Module):
         return X, P
 
     def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        h = self.h
-        tk = self.sched.t0 + float(k) * h
         device, dtype = Xk.device, Xk.dtype
+        h = float(self.h(device=device, dtype=dtype).detach().cpu().item())
+        tk = self.sched.t0 + float(k) * h
 
         # exact half damping
         d_eta = self.sched.delta_eta(tk, 0.5 * h, device, dtype)
@@ -946,7 +1041,8 @@ class HalfDampStrangAttention(nn.Module):
         Pk1 = sigma_half * P1
         if self.presymp_lnp != "none":
             Pk1 = self._apply_lnp(Pk1)
-        self.last_xi = float(self.xi)
+        self.last_h = h
+        self.last_xi = float(self.xi(h=torch.tensor(h, dtype=torch.float32)).detach().cpu().item())
         return X1, Pk1
 
 
@@ -972,7 +1068,7 @@ class PresympGPTBlock(nn.Module):
         eta_clip: float = 50.0,
         presymp_lnp: str = "end",
         # xi adaptation options
-        xi_adapt: bool = False,
+        # xi_adapt: bool = False,
         r_thresh: float = 1e-2,
         r_low: float = 1e-4,
         xi_mult_up: float = 2.0,
@@ -980,8 +1076,8 @@ class PresympGPTBlock(nn.Module):
         xi_min: float = 1e-4,
         xi_max: float = 100.0,
         theta_max: float = 1.0,
-        xi_adapt_warmup: int = 10,
-        xi_adapt_every: int = 1,
+        # xi_adapt_warmup: int = 10,
+        # xi_adapt_every: int = 1,
     ):
         super().__init__()
         self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
@@ -991,7 +1087,7 @@ class PresympGPTBlock(nn.Module):
                 cfg,
                 h=h,
                 xi=xi,
-                xi_adapt=xi_adapt,
+                # xi_adapt=xi_adapt,
                 r_thresh=r_thresh,
                 r_low=r_low,
                 xi_mult_up=xi_mult_up,
@@ -999,8 +1095,8 @@ class PresympGPTBlock(nn.Module):
                 xi_min=xi_min,
                 xi_max=xi_max,
                 theta_max=theta_max,
-                xi_adapt_warmup=xi_adapt_warmup,
-                xi_adapt_every=xi_adapt_every,
+                # xi_adapt_warmup=xi_adapt_warmup,
+                # xi_adapt_every=xi_adapt_every,
                 t0=t0,
                 eta_mu=eta_mu,
                 eta_log_coef=eta_log_coef,
@@ -1015,6 +1111,22 @@ class PresympGPTBlock(nn.Module):
             )
         elif attn_scheme == "euler":
             self.attn = DampedEulerAttention(
+                cfg,
+                h=h,
+                t0=t0,
+                eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+                eta_mode=eta_mode,
+                eta_init=eta_init,
+                eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
+            )
+        elif attn_scheme == "exp_euler":
+            self.attn = DampedExpEulerAttention(
                 cfg,
                 h=h,
                 t0=t0,
@@ -1048,7 +1160,7 @@ class PresympGPTBlock(nn.Module):
                 presymp_lnp=presymp_lnp,
             )
         else:
-            raise ValueError("attn_scheme must be one of {'presymp','euler','strang'}")
+            raise ValueError("attn_scheme must be one of {'presymp','euler','exp_euler','strang'}")
 
         # MLP substep (accelerated)
         self.ln_x_mlp = LayerNorm(cfg.n_embd, bias=cfg.bias)
@@ -1078,7 +1190,7 @@ class PresympGPTBlock(nn.Module):
         if self.mlp_use_attn_vel:
             # Variant A: use attention-induced velocity for MLP lookahead
             # v_attn ≈ (x_after_attn - x_before_attn)/h
-            h = float(getattr(self.attn, 'h', 1.0))
+            h = self.attn.h().detach().item()
             if h == 0.0:
                 h = 1.0
             v_attn = (x - x0) / h
@@ -1099,6 +1211,239 @@ class PresympGPTBlock(nn.Module):
         return x, p, v
 
 
+class PresympMLPSubstep(nn.Module):
+    # MLP substep used by presymp-family models.
+    # Supports:
+    #  - learned Nesterov velocity stream (mu,beta,gamma learned)
+    #  - Variant A (mlp_use_attn_vel=True): use attention-induced velocity for lookahead
+
+    def __init__(self, cfg: ModelConfig, mlp_use_attn_vel: bool = False):
+        super().__init__()
+        self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
+        self.ln_x_mlp = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.mlp = MLP(cfg)
+        self.ln_v_mlp = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.mu_mlp = ConstrainedScalar(0.9, "unit")
+        self.beta_mlp = ConstrainedScalar(0.9, "unit")
+        self.gamma_mlp = ConstrainedScalar(1.0, "pos")
+
+    def forward(self, x: torch.Tensor, v: torch.Tensor, v_attn: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
+        mu = self.mu_mlp()
+        gamma = self.gamma_mlp()
+
+        if self.mlp_use_attn_vel:
+            if v_attn is None:
+                raise ValueError('mlp_use_attn_vel=True requires v_attn')
+            x_in = x + mu * v_attn
+            dx = self.mlp(self.ln_x_mlp(x_in))
+            x = x + gamma * dx
+            v = v_attn
+            return x, v
+
+        beta = self.beta_mlp()
+        x_in = x + mu * v
+        dx = self.mlp(self.ln_x_mlp(x_in))
+        v = beta * v + gamma * dx
+        v = self.ln_v_mlp(v)
+        x = x + v
+        return x, v
+
+
+class PresympModelAB2(nn.Module):
+    # Presymp-family architecture with an Adams-Bashforth 2 (AB2) attention update.
+    # One new attention RHS evaluation per layer; reuses the previous RHS.
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        h: float = 1.0,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        presymp_lnp: str = "end",
+        use_v0_init: bool = True,
+        mlp_use_attn_vel: bool = False,
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.h = float(h)
+        self.use_v0_init = bool(use_v0_init)
+        self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
+
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.tok_v0_emb_mlp = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_v0_emb_mlp = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+
+        self.attn = nn.ModuleList([
+            DampedEulerAttention(
+                cfg,
+                h=h,
+                t0=t0,
+                eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+                eta_mode=eta_mode,
+                eta_init=eta_init,
+                eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
+            )
+            for _ in range(cfg.n_layer)
+        ])
+        self.mlp_steps = nn.ModuleList([
+            PresympMLPSubstep(cfg, mlp_use_attn_vel=self.mlp_use_attn_vel)
+            for _ in range(cfg.n_layer)
+        ])
+
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+
+        self.last_rX_max = 0.0
+        self.last_rP_max = 0.0
+        self.last_xi_mean = 0.0
+        self.last_h_mean = 0.0
+
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m: nn.Module):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
+            if m.bias is not None:
+                torch.nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.Embedding):
+            torch.nn.init.normal_(m.weight, mean=0.0, std=0.02)
+
+    def forward(self, idx: torch.Tensor, targets: Optional[torch.Tensor] = None, global_step: Optional[int] = None):
+        B, T = idx.shape
+        assert T <= self.cfg.block_size
+        pos = torch.arange(0, T, device=idx.device)
+        x = self.tok_emb(idx) + self.pos_emb(pos)[None, :, :]
+        x = self.drop(x)
+
+        if self.use_v0_init:
+            p = self.drop(self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None, :, :])
+            if self.mlp_use_attn_vel:
+                v = torch.zeros_like(x)
+            else:
+                v = self.drop(self.tok_v0_emb_mlp(idx) + self.pos_v0_emb_mlp(pos)[None, :, :])
+        else:
+            p = torch.zeros_like(x)
+            v = torch.zeros_like(x)
+
+        dx_prev = None
+        dp_prev = None
+
+        for k in range(self.cfg.n_layer):
+            h_k = self.attn[k].h()  # learned scalar tensor, kept in graph
+            dx_k, dp_k = self.attn[k].rhs(x, p, k)
+            if k == 0 or dx_prev is None:
+                dx_eff, dp_eff = dx_k, dp_k
+            else:
+                dx_eff = 1.5 * dx_k - 0.5 * dx_prev
+                dp_eff = 1.5 * dp_k - 0.5 * dp_prev
+
+            x_new = x + h_k * dx_eff
+            p_new = p + h_k * dp_eff
+            if self.attn[k].presymp_lnp != "none":
+                p_new = self.attn[k]._apply_lnp(p_new)
+
+            v_attn = (x_new - x) / h_k.clamp(min=1e-8)
+            x, p = x_new, p_new
+            dx_prev, dp_prev = dx_k, dp_k
+
+            x, v = self.mlp_steps[k](x, v, v_attn=v_attn)
+
+        h_vals = [self.attn[k].h().detach().cpu().item() for k in range(self.cfg.n_layer)]
+        self.last_h_mean = sum(h_vals) / len(h_vals)
+        # xi is not used in AB2 (DampedEulerAttention has no theta_xi_raw)
+        self.last_xi_mean = float('nan')
+
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+class PresympModelETDAB2(PresympModelAB2):
+    # ETD-AB2 variant: AB2 on the integrating-factor momentum Pi=exp(eta) P.
+
+    def forward(self, idx: torch.Tensor, targets: Optional[torch.Tensor] = None, global_step: Optional[int] = None):
+        B, T = idx.shape
+        assert T <= self.cfg.block_size
+        pos = torch.arange(0, T, device=idx.device)
+        x = self.tok_emb(idx) + self.pos_emb(pos)[None, :, :]
+        x = self.drop(x)
+
+        if self.use_v0_init:
+            p = self.drop(self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None, :, :])
+            if self.mlp_use_attn_vel:
+                v = torch.zeros_like(x)
+            else:
+                v = self.drop(self.tok_v0_emb_mlp(idx) + self.pos_v0_emb_mlp(pos)[None, :, :])
+        else:
+            p = torch.zeros_like(x)
+            v = torch.zeros_like(x)
+
+        H_prev = None
+
+        for k in range(self.cfg.n_layer):
+            h_k = self.attn[k].h()  # learned scalar tensor, kept in graph
+            h_k_f = h_k.detach().item()  # Python float for time index only
+            Fv, Gv, z, _alpha = self.attn[k].FG_alpha(x, p, k)
+            tk = self.attn[k].sched.t0 + float(k) * h_k_f
+            device, dtype = x.device, x.dtype
+            Lam_k = self.attn[k].sched.exp_eta(tk, device, dtype)
+            Lam_k1 = self.attn[k].sched.exp_eta(tk + h_k_f, device, dtype)
+
+            Pi = Lam_k * p
+            H_k = Lam_k * Gv
+
+            if k == 0 or H_prev is None:
+                H_eff = H_k
+            else:
+                H_eff = 1.5 * H_k - 0.5 * H_prev
+
+            Pi_new = Pi + h_k * H_eff
+            p_new = Pi_new / Lam_k1
+
+            x_new = x + h_k * (p_new / z.unsqueeze(-1))
+            if self.attn[k].presymp_lnp != "none":
+                p_new = self.attn[k]._apply_lnp(p_new)
+
+            v_attn = (x_new - x) / h_k.clamp(min=1e-8)
+            x, p = x_new, p_new
+            H_prev = H_k
+
+            x, v = self.mlp_steps[k](x, v, v_attn=v_attn)
+
+        h_vals = [self.attn[k].h().detach().cpu().item() for k in range(self.cfg.n_layer)]
+        self.last_h_mean = sum(h_vals) / len(h_vals)
+        self.last_xi_mean = float('nan')
+
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
 class GPTModel(nn.Module):
     def __init__(self, cfg: ModelConfig):
         super().__init__()
@@ -1112,11 +1457,10 @@ class GPTModel(nn.Module):
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
         self.lm_head.weight = self.tok_emb.weight
 
-        # last diagnostics for xi adaptation
         self.last_rX_max = 0.0
         self.last_rP_max = 0.0
-        # Baseline model has no presymplectic coupling; keep a safe default.
         self.last_xi_mean = 0.0
+        self.last_h_mean = 0.0
 
         self.apply(self._init_weights)
 
@@ -1288,7 +1632,7 @@ class PresympModel(nn.Module):
         presymp_lnp: str = "end",
         use_v0_init: bool = True,
         # xi adaptation options
-        xi_adapt: bool = False,
+        # xi_adapt: bool = False,
         r_thresh: float = 1e-2,
         r_low: float = 1e-4,
         xi_mult_up: float = 2.0,
@@ -1296,8 +1640,8 @@ class PresympModel(nn.Module):
         xi_min: float = 1e-4,
         xi_max: float = 100.0,
         theta_max: float = 1.0,
-        xi_adapt_warmup: int = 10,
-        xi_adapt_every: int = 1,
+        # xi_adapt_warmup: int = 10,
+        # xi_adapt_every: int = 1,
         mlp_use_attn_vel: bool = False,
     ):
         super().__init__()
@@ -1335,7 +1679,7 @@ class PresympModel(nn.Module):
             eta_init=eta_init,
             eta_clip=eta_clip,
                 presymp_lnp=presymp_lnp,
-                xi_adapt=xi_adapt,
+                # xi_adapt=xi_adapt,
                 r_thresh=r_thresh,
                 r_low=r_low,
                 xi_mult_up=xi_mult_up,
@@ -1343,8 +1687,8 @@ class PresympModel(nn.Module):
                 xi_min=xi_min,
                 xi_max=xi_max,
             theta_max=theta_max,
-            xi_adapt_warmup=xi_adapt_warmup,
-                xi_adapt_every=xi_adapt_every,
+            # xi_adapt_warmup=xi_adapt_warmup,
+                # xi_adapt_every=xi_adapt_every,
             )
             for _ in range(cfg.n_layer)
         ])
@@ -1387,6 +1731,8 @@ class PresympModel(nn.Module):
         rP_max = 0.0
         xi_sum = 0.0
         xi_cnt = 0
+        h_sum = 0.0
+        h_cnt = 0
         for k, blk in enumerate(self.blocks):
             x, p, v = blk(x, p, v, k)
             attn = getattr(blk, 'attn', None)
@@ -1395,10 +1741,14 @@ class PresympModel(nn.Module):
                 rP_max = max(rP_max, float(attn.last_rP))
                 xi_sum += float(attn.last_xi)
                 xi_cnt += 1
+            if attn is not None and hasattr(attn, 'last_h'):
+                h_sum += float(attn.last_h)
+                h_cnt += 1
 
         self.last_rX_max = rX_max
         self.last_rP_max = rP_max
         self.last_xi_mean = (xi_sum / xi_cnt) if xi_cnt > 0 else float('nan')
+        self.last_h_mean = (h_sum / h_cnt) if h_cnt > 0 else float('nan')
 
         x = self.ln_f(x)
         logits = self.lm_head(x)

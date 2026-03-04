@@ -1,0 +1,161 @@
+#!/bin/bash --login
+#SBATCH --job-name=xi_larger
+#SBATCH --mail-type=end
+#SBATCH --mail-user=stein@math.tu-berlin.de
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=48:00:00
+#SBATCH --output=xi_larger.log
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+
+cd /work/stein/
+conda activate nicos_stuff
+cd /work/stein/yuriiformer_presymp
+
+DEVICE=cuda
+OUTDIR=xi_larger_${SLURM_JOB_ID}   # avoids mixing old runs
+mkdir -p "${OUTDIR}"
+
+# ---- shared hyperparameters ----
+N_LAYER=4
+N_HEAD=4
+N_EMBD=128
+BLOCK_SIZE=64
+BATCH_SIZE=6
+GRAD_ACCUM_STEPS=16
+MAX_STEPS=101
+EVAL_INTERVAL=100
+EVAL_BATCHES=20
+LOG_INTERVAL=200
+WARMUP_STEPS=150
+MIN_LR_RATIO=0.3
+PEAK_LR=3e-4
+LEARN_H=1
+LEARN_XI=1
+DATASET=openwebtext
+
+# ---- learned step size (no longer a fixed discretization hyperparameter) ----
+# The code interprets --presymp_h as an *initialization* h0 for the (optionally) learnable parameter.
+# Use different initializations for first-order vs second-order discretizations.
+H_INIT_FIRST=0.25   # e.g. Euler / ExpEuler
+H_INIT_SECOND=0.01  # e.g. presymp (scaled), AB2, ETD-AB2, Strang
+
+# presymp extras
+PRESYMP_DAMPING=( --eta_learnable --eta_mode loglin --eta_log_init 3 --eta_lin_init 1e-4 --eta_clip 12 )
+
+# learned coupling (no longer a fixed discretization hyperparameter)
+# The code interprets --presymp_xi as an *initialization* xi0 for the learnable parameter.
+XI_INIT=0.5
+
+log() { echo "[$(date -Is)] $*"; }
+run() { log "RUN: $(printf '%q ' "$@")"; "$@"; }
+
+COMMON_ARGS=(
+  --data_dir data --dataset "${DATASET}"
+  --out_dir "${OUTDIR}"
+  --n_layer "${N_LAYER}" --n_head "${N_HEAD}" --n_embd "${N_EMBD}" --block_size "${BLOCK_SIZE}"
+  --batch_size "${BATCH_SIZE}" --grad_accum_steps "${GRAD_ACCUM_STEPS}"
+  --max_steps "${MAX_STEPS}" --eval_interval "${EVAL_INTERVAL}" --eval_batches "${EVAL_BATCHES}" --log_interval "${LOG_INTERVAL}"
+  --warmup_steps "${WARMUP_STEPS}" --device "${DEVICE}" --plot
+  --min_lr_ratio "${MIN_LR_RATIO}" --peak_lr "${PEAK_LR}" --presymp_lnp end
+)
+
+run_train() {
+  local arch="$1"; shift
+  run python3 -u train.py --arch "${arch}" --learn_h "${LEARN_H}" --learn_xi "${LEARN_XI}" "${COMMON_ARGS[@]}" "$@"
+}
+
+mk_tag_h0() {
+  local h0="$1"
+  local hh="${h0//./p}"
+  echo "h0${hh}"
+}
+
+mk_tag_h0_xi0() {
+  local h0="$1" xi0="$2"
+  local hh="${h0//./p}"
+  local xx="${xi0//./p}"
+  echo "h0${hh}_xi0${xx}"
+}
+
+log "Job meta: jobid=${SLURM_JOB_ID:-NA} host=$(hostname) pwd=$(pwd)"
+log "Device: ${DEVICE}"
+log "OUTDIR: ${OUTDIR}"
+log "h0 init: first-order=${H_INIT_FIRST}, second-order=${H_INIT_SECOND}; learn_h=${LEARN_H}, learn_xi=${LEARN_XI}"
+log "Learned coupling init XI_INIT=${XI_INIT}"
+
+# 1) baseline + 2) yurii
+run_train baseline
+run_train yurii_lt
+
+# 3) presymplectic (scaled momentum); learned h,xi initialized by H_INIT, XI_INIT
+TAG_PRESYMP="$(mk_tag_h0_xi0 "${H_INIT_SECOND}" "${XI_INIT}")"
+run_train presymp       "${PRESYMP_DAMPING[@]}"       --presymp_h "${H_INIT_SECOND}" --presymp_xi "${XI_INIT}" --run_name "${TAG_PRESYMP}" --presymp_mlp_use_attn_vel  
+
+
+# 4) Euler (xi not used) with learned h init
+TAG_EULER="$(mk_tag_h0 "${H_INIT_FIRST}")"
+run_train presymp_euler \
+  "${PRESYMP_DAMPING[@]}" \
+  --presymp_h "${H_INIT_FIRST}" --run_name "${TAG_EULER}"
+
+# 4b) Exponential Euler (integrating factor); learned h,xi initialized by H_INIT, XI_INIT
+TAG_EXPEULER="$(mk_tag_h0_xi0 "${H_INIT_FIRST}" "${XI_INIT}")"
+run_train presymp_exp_euler       "${PRESYMP_DAMPING[@]}"       --presymp_h "${H_INIT_FIRST}" --presymp_xi "${XI_INIT}" --run_name "${TAG_EXPEULER}" --presymp_mlp_use_attn_vel
+
+
+# 4c) AB2 multistep (variable-step AB2 in the patched code). xi not used.
+TAG_AB2="$(mk_tag_h0 "${H_INIT_SECOND}")"
+run_train presymp_ab2 \
+  "${PRESYMP_DAMPING[@]}" \
+  --presymp_h "${H_INIT_SECOND}" --run_name "${TAG_AB2}" \
+  --presymp_mlp_use_attn_vel
+
+# 4d) ETD-AB2 (integrating factor in momentum). xi not used.
+TAG_ETD_AB2="$(mk_tag_h0 "${H_INIT_SECOND}")"
+run_train presymp_etd_ab2 \
+  "${PRESYMP_DAMPING[@]}" \
+  --presymp_h "${H_INIT_SECOND}" --run_name "${TAG_ETD_AB2}" \
+  --presymp_mlp_use_attn_vel
+
+# 5) Strang (learned h,xi; theta_max fixed)
+STRANG_THETA_MAX="0.5"
+TAG_STRANG="$(mk_tag_h0_xi0 "${H_INIT_SECOND}" "${XI_INIT}")"
+run_train presymp_strang       "${PRESYMP_DAMPING[@]}"       --presymp_h "${H_INIT_SECOND}" --presymp_xi "${XI_INIT}" --presymp_theta_max "${STRANG_THETA_MAX}" --run_name "${TAG_STRANG}"
+
+
+# ---- plotting: build RUNS/LABELS from the tags ----
+RUNS=(
+  "${OUTDIR}/baseline"
+  "${OUTDIR}/yurii_lt"
+  "${OUTDIR}/presymp_${TAG_PRESYMP}"
+  "${OUTDIR}/presymp_euler_${TAG_EULER}"
+  "${OUTDIR}/presymp_exp_euler_${TAG_EXPEULER}"
+  "${OUTDIR}/presymp_ab2_${TAG_AB2}"
+  "${OUTDIR}/presymp_etd_ab2_${TAG_ETD_AB2}"
+  "${OUTDIR}/presymp_strang_${TAG_STRANG}"
+)
+LABELS=(
+  "Baseline"
+  "YuriiFormer-Lie-Trotter"
+  "Presymp (scaled momentum, learned h,xi), init h0=${H_INIT_SECOND}, xi0=${XI_INIT}"
+  "Presymp Euler (h init), h0=${H_INIT_FIRST}"
+  "Presymp ExpEuler (h,xi init), h0=${H_INIT_FIRST}, xi0=${XI_INIT}"
+  "Presymp AB2 (h init), h0=${H_INIT_SECOND}"
+  "Presymp ETD-AB2 (h init), h0=${H_INIT_SECOND}"
+  "Presymp Strang (h,xi init), h0=${H_INIT_SECOND}, xi0=${XI_INIT}"
+)
+
+
+python3 -u plot_compare.py \
+  --runs "${RUNS[@]}" \
+  --labels "${LABELS[@]}" \
+  --out "${OUTDIR}/compare_loss.png" \
+  --latex_table \
+  --latex_caption "Validation loss on the ${DATASET} data set after ${MAX_STEPS} optimization steps. Hyperparameters: ${N_LAYER} layers, ${N_HEAD} heads, embedding dimension ${N_EMBD}, block size ${BLOCK_SIZE}, batch size ${BATCH_SIZE}, gradient accumulation steps ${GRAD_ACCUM_STEPS}, evaluation batches ${EVAL_BATCHES}, warmup steps ${WARMUP_STEPS}, minimum learning-rate ratio ${MIN_LR_RATIO}, peak learning rate ${PEAK_LR}. Learned integrator step size and coupling initialized with h0=${H_INIT_FIRST}, xi0=${XI_INIT}."
+
+run python3 -u plot_compare.py --runs "${RUNS[@]}" --labels "${LABELS[@]}" --out "${OUTDIR}/compare_loss_wall.png" --xaxis wall
+run python3 -u plot_compare.py --runs "${RUNS[@]}" --labels "${LABELS[@]}" --out "${OUTDIR}/compare_loss_tokens.png" --xaxis tokens

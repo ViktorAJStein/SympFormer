@@ -11,7 +11,7 @@ import torch.nn as nn
 from torch.optim import AdamW
 
 from data import DataConfig, BlockEpochIterator, load_bin
-from model import ModelConfig, GPTModel, YuriiFormerModel, PresympModel
+from model import ModelConfig, GPTModel, YuriiFormerModel, PresympModel, PresympModelAB2, PresympModelETDAB2
 
 
 def ensure_csv_header(path: str, header):
@@ -95,6 +95,7 @@ def build_optimizer(model: nn.Module, peak_lr: float, betas=(0.9, 0.95)):
     emb_params = []
     norm_params = []
     scalar_params = []
+    integrator_params = []  # theta_h/theta_xi_raw
     other_params = []
 
     for name, p in model.named_parameters():
@@ -102,6 +103,8 @@ def build_optimizer(model: nn.Module, peak_lr: float, betas=(0.9, 0.95)):
             continue
         if ("tok_emb" in name) or ("pos_emb" in name) or ("tok_v0_emb" in name) or ("pos_v0_emb" in name):
             emb_params.append(p)
+        elif "theta_h" in name or "theta_xi_raw" in name:
+            integrator_params.append(p)
         elif ".raw" in name:  # ConstrainedScalar raw parameters
             scalar_params.append(p)
         elif "ln_" in name or ".ln" in name or "ln_f" in name or "ln_v" in name or "LayerNorm" in name:
@@ -118,6 +121,8 @@ def build_optimizer(model: nn.Module, peak_lr: float, betas=(0.9, 0.95)):
         param_groups.append({"params": norm_params, "lr": peak_lr, "weight_decay": 0.0})
     if scalar_params:
         param_groups.append({"params": scalar_params, "lr": peak_lr * scalar_mult, "weight_decay": 0.0, "lr_mult": scalar_mult})
+    if integrator_params:
+        param_groups.append({"params": integrator_params, "lr": peak_lr * scalar_mult, "weight_decay": 0.0, "lr_mult": scalar_mult})
 
     opt = AdamW(param_groups, betas=betas)
     return opt
@@ -153,9 +158,16 @@ def main():
         "--arch",
         type=str,
         default="yurii_lt",
-        choices=["baseline", "yurii_lt", "presymp", "presymp_euler", "presymp_strang"],
+        choices=["baseline", "yurii_lt", "presymp", "presymp_euler", "presymp_exp_euler", "presymp_ab2", "presymp_etd_ab2", "presymp_strang"],
         help="model architecture / attention discretization",
     )
+
+    # ---- learned integrator scalars toggles ----
+    ap.add_argument("--learn_h", type=int, default=1,
+                    help="If 1, learn the integrator step size h (theta_h is trainable). If 0, keep it fixed.")
+    ap.add_argument("--learn_xi", type=int, default=1,
+                    help="If 1, learn the coupling xi (theta_xi_raw is trainable). If 0, keep it fixed.")
+
 
     # Paper-like defaults (TinyStories small)
     ap.add_argument("--n_layer", type=int, default=12)
@@ -189,7 +201,7 @@ def main():
     ap.add_argument("--eta_clip", type=float, default=50.0, help="clamp eta(t) to [-eta_clip, eta_clip] before exponentiation")
 
     # Presymplectic xi adaptation (data-driven)
-    ap.add_argument("--presymp_xi_adapt", action="store_true", help="adapt xi online based on r_X and r_P thresholds (breaks exact presymplecticity)")
+    # ap.add_argument("--presymp_xi_adapt", action="store_true", help="adapt xi online based on r_X and r_P thresholds (breaks exact presymplecticity)")
     ap.add_argument("--presymp_r_thresh", type=float, default=1e-2, help="increase xi if max(r_X,r_P) exceeds this")
     ap.add_argument("--presymp_r_low", type=float, default=1e-4, help="decrease xi if max(r_X,r_P) goes below this")
     ap.add_argument("--presymp_xi_mult_up", type=float, default=1.25, help="multiplier when increasing xi")
@@ -197,8 +209,8 @@ def main():
     ap.add_argument("--presymp_xi_min", type=float, default=1e-4, help="lower bound for xi during adaptation")
     ap.add_argument("--presymp_xi_max", type=float, default=100.0, help="upper bound for xi during adaptation (also capped by theta_max/(2h))")
     ap.add_argument("--presymp_theta_max", type=float, default=1.0, help="cap the coupling rotation angle theta=2*xi*h to at most theta_max by enforcing xi<=theta_max/(2h)")
-    ap.add_argument("--presymp_xi_adapt_warmup", type=int, default=10, help="do not adapt xi for the first this many presymp steps")
-    ap.add_argument("--presymp_xi_adapt_every", type=int, default=1, help="update xi every N presymp steps (after warmup)")
+    # ap.add_argument("--presymp_xi_adapt_warmup", type=int, default=10, help="do not adapt xi for the first this many presymp steps")
+    # ap.add_argument("--presymp_xi_adapt_every", type=int, default=1, help="update xi every N presymp steps (after warmup)")
     ap.add_argument("--presymp_lnp", type=str, default="end", choices=["none","end","each_substep"], help="LayerNorm on presymplectic attention momentum P/Pi: none|end|each_substep")
 
     # Variant A: use attention-induced velocity for the MLP lookahead (drop separate MLP velocity dynamics)
@@ -302,45 +314,178 @@ def main():
     else:
         # Presymp family: same overall architecture, different attention discretization
         if args.arch == "presymp":
-            attn_scheme = "presymp"
+            model = PresympModel(
+                mcfg,
+                attn_scheme="presymp",
+                h=args.presymp_h,
+                xi=args.presymp_xi,
+                t0=args.presymp_t0,
+                eta_mu=args.eta_mu,
+                eta_log_coef=args.eta_log_coef,
+                eta_lin_coef=args.eta_lin_coef,
+                eta_log_init=args.eta_log_init,
+                eta_lin_init=args.eta_lin_init,
+                eta_learnable=args.eta_learnable,
+                eta_mode=args.eta_mode,
+                eta_init=args.eta_init,
+                eta_clip=args.eta_clip,
+                use_v0_init=(not args.no_v0_init),
+                # xi_adapt=args.presymp_xi_adapt,
+                r_thresh=args.presymp_r_thresh,
+                r_low=args.presymp_r_low,
+                xi_mult_up=args.presymp_xi_mult_up,
+                xi_mult_down=args.presymp_xi_mult_down,
+                xi_min=args.presymp_xi_min,
+                xi_max=args.presymp_xi_max,
+                theta_max=args.presymp_theta_max,
+                presymp_lnp=args.presymp_lnp,
+                # xi_adapt_warmup=args.presymp_xi_adapt_warmup,
+                # xi_adapt_every=args.presymp_xi_adapt_every,
+                mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+            )
         elif args.arch == "presymp_euler":
-            attn_scheme = "euler"
+            model = PresympModel(
+                mcfg,
+                attn_scheme="euler",
+                h=args.presymp_h,
+                xi=args.presymp_xi,
+                t0=args.presymp_t0,
+                eta_mu=args.eta_mu,
+                eta_log_coef=args.eta_log_coef,
+                eta_lin_coef=args.eta_lin_coef,
+                eta_log_init=args.eta_log_init,
+                eta_lin_init=args.eta_lin_init,
+                eta_learnable=args.eta_learnable,
+                eta_mode=args.eta_mode,
+                eta_init=args.eta_init,
+                eta_clip=args.eta_clip,
+                use_v0_init=(not args.no_v0_init),
+                # xi_adapt=args.presymp_xi_adapt,
+                r_thresh=args.presymp_r_thresh,
+                r_low=args.presymp_r_low,
+                xi_mult_up=args.presymp_xi_mult_up,
+                xi_mult_down=args.presymp_xi_mult_down,
+                xi_min=args.presymp_xi_min,
+                xi_max=args.presymp_xi_max,
+                theta_max=args.presymp_theta_max,
+                presymp_lnp=args.presymp_lnp,
+                # xi_adapt_warmup=args.presymp_xi_adapt_warmup,
+                # xi_adapt_every=args.presymp_xi_adapt_every,
+                mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+            )
+        elif args.arch == "presymp_exp_euler":
+            model = PresympModel(
+                mcfg,
+                attn_scheme="exp_euler",
+                h=args.presymp_h,
+                xi=args.presymp_xi,
+                t0=args.presymp_t0,
+                eta_mu=args.eta_mu,
+                eta_log_coef=args.eta_log_coef,
+                eta_lin_coef=args.eta_lin_coef,
+                eta_log_init=args.eta_log_init,
+                eta_lin_init=args.eta_lin_init,
+                eta_learnable=args.eta_learnable,
+                eta_mode=args.eta_mode,
+                eta_init=args.eta_init,
+                eta_clip=args.eta_clip,
+                use_v0_init=(not args.no_v0_init),
+                # xi_adapt=args.presymp_xi_adapt,
+                r_thresh=args.presymp_r_thresh,
+                r_low=args.presymp_r_low,
+                xi_mult_up=args.presymp_xi_mult_up,
+                xi_mult_down=args.presymp_xi_mult_down,
+                xi_min=args.presymp_xi_min,
+                xi_max=args.presymp_xi_max,
+                theta_max=args.presymp_theta_max,
+                presymp_lnp=args.presymp_lnp,
+                # xi_adapt_warmup=args.presymp_xi_adapt_warmup,
+                # xi_adapt_every=args.presymp_xi_adapt_every,
+                mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+            )
+        elif args.arch == "presymp_ab2":
+            model = PresympModelAB2(
+                mcfg,
+                h=args.presymp_h,
+                t0=args.presymp_t0,
+                eta_mu=args.eta_mu,
+                eta_log_coef=args.eta_log_coef,
+                eta_lin_coef=args.eta_lin_coef,
+                eta_log_init=args.eta_log_init,
+                eta_lin_init=args.eta_lin_init,
+                eta_learnable=args.eta_learnable,
+                eta_mode=args.eta_mode,
+                eta_init=args.eta_init,
+                eta_clip=args.eta_clip,
+                presymp_lnp=args.presymp_lnp,
+                use_v0_init=(not args.no_v0_init),
+                mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+            )
+        elif args.arch == "presymp_etd_ab2":
+            model = PresympModelETDAB2(
+                mcfg,
+                h=args.presymp_h,
+                t0=args.presymp_t0,
+                eta_mu=args.eta_mu,
+                eta_log_coef=args.eta_log_coef,
+                eta_lin_coef=args.eta_lin_coef,
+                eta_log_init=args.eta_log_init,
+                eta_lin_init=args.eta_lin_init,
+                eta_learnable=args.eta_learnable,
+                eta_mode=args.eta_mode,
+                eta_init=args.eta_init,
+                eta_clip=args.eta_clip,
+                presymp_lnp=args.presymp_lnp,
+                use_v0_init=(not args.no_v0_init),
+                mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+            )
         elif args.arch == "presymp_strang":
-            attn_scheme = "strang"
+            model = PresympModel(
+                mcfg,
+                attn_scheme="strang",
+                h=args.presymp_h,
+                xi=args.presymp_xi,
+                t0=args.presymp_t0,
+                eta_mu=args.eta_mu,
+                eta_log_coef=args.eta_log_coef,
+                eta_lin_coef=args.eta_lin_coef,
+                eta_log_init=args.eta_log_init,
+                eta_lin_init=args.eta_lin_init,
+                eta_learnable=args.eta_learnable,
+                eta_mode=args.eta_mode,
+                eta_init=args.eta_init,
+                eta_clip=args.eta_clip,
+                use_v0_init=(not args.no_v0_init),
+                # xi_adapt=args.presymp_xi_adapt,
+                r_thresh=args.presymp_r_thresh,
+                r_low=args.presymp_r_low,
+                xi_mult_up=args.presymp_xi_mult_up,
+                xi_mult_down=args.presymp_xi_mult_down,
+                xi_min=args.presymp_xi_min,
+                xi_max=args.presymp_xi_max,
+                theta_max=args.presymp_theta_max,
+                presymp_lnp=args.presymp_lnp,
+                # xi_adapt_warmup=args.presymp_xi_adapt_warmup,
+                # xi_adapt_every=args.presymp_xi_adapt_every,
+                mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+            )
         else:
             raise ValueError(f"Unknown arch: {args.arch}")
 
-        model = PresympModel(
-            mcfg,
-            attn_scheme=attn_scheme,
-            h=args.presymp_h,
-            xi=args.presymp_xi,
-            t0=args.presymp_t0,
-            eta_mu=args.eta_mu,
-            eta_log_coef=args.eta_log_coef,
-            eta_lin_coef=args.eta_lin_coef,
-            eta_log_init=args.eta_log_init,
-            eta_lin_init=args.eta_lin_init,
-            eta_learnable=args.eta_learnable,
-            eta_mode=args.eta_mode,
-            eta_init=args.eta_init,
-            eta_clip=args.eta_clip,
-            use_v0_init=(not args.no_v0_init),
-            xi_adapt=args.presymp_xi_adapt,
-            r_thresh=args.presymp_r_thresh,
-            r_low=args.presymp_r_low,
-            xi_mult_up=args.presymp_xi_mult_up,
-            xi_mult_down=args.presymp_xi_mult_down,
-            xi_min=args.presymp_xi_min,
-            xi_max=args.presymp_xi_max,
-            theta_max=args.presymp_theta_max,
-            presymp_lnp=args.presymp_lnp,
-            xi_adapt_warmup=args.presymp_xi_adapt_warmup,
-            xi_adapt_every=args.presymp_xi_adapt_every,
-            mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
-        )
-
     model.to(device)
+    # Optionally freeze learned integrator scalars (h, xi) so they stay fixed.
+    if args.learn_h == 0:
+        for n, p in model.named_parameters():
+            if "theta_h" in n:
+                p.requires_grad_(False)
+    if args.learn_xi == 0:
+        for n, p in model.named_parameters():
+            if "theta_xi_raw" in n:
+                p.requires_grad_(False)
+        # disable heuristic xi adaptation if present
+        # if hasattr(args, "presymp_xi_adapt"):
+        #     args.presymp_xi_adapt = False
+
 
     opt = build_optimizer(model, peak_lr=args.peak_lr, betas=tuple(args.betas))
 
@@ -362,7 +507,7 @@ def main():
     # tokens_cum: cumulative tokens processed since step 0
     ensure_csv_header(
         metrics_path,
-        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "xi", "rX", "rP"],
+        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "xi_mean", "rX", "rP"],
     )
     plot_path = os.path.join(run_dir, "loss.png")
 
@@ -396,7 +541,8 @@ def main():
 
         # clip
         if args.grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            clip_params = [p for (n,p) in model.named_parameters() if p.requires_grad and ('theta_h' not in n and 'theta_xi_raw' not in n)]
+            torch.nn.utils.clip_grad_norm_(clip_params, args.grad_clip)
 
         opt.step()
 
@@ -411,7 +557,7 @@ def main():
             if args.arch == "yurii_lt" and args.yurii_restart != "none":
                 extra = f" | restarts {restarts_accum}"
             if args.arch.startswith("presymp") and hasattr(model, "last_xi_mean"):
-                extra += f" | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e}"
+                extra += f" | h_mean {getattr(model, 'last_h_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e}"
             print(
                 f"[{args.arch}] step {step:6d} | loss {loss_accum:.4f} | lr {lr:.2e} | "
                 f"toks/step {toks_per_step} | wall_dt {dt:.2f}s | wall {wall_cum:.1f}s{extra}"
@@ -427,6 +573,7 @@ def main():
                     f"{wall_cum:.6f}",
                     str(toks_per_step),
                     str(toks_cum),
+                    f"{getattr(model, 'last_h_mean', '')}",
                     f"{getattr(model, 'last_xi_mean', '')}",
                     f"{getattr(model, 'last_rX_max', '')}",
                     f"{getattr(model, 'last_rP_max', '')}",
@@ -447,6 +594,7 @@ def main():
                     f"{wall_cum:.6f}",
                     str(toks_per_step),
                     str(toks_cum),
+                    f"{getattr(model, 'last_h_mean', '')}",
                     f"{getattr(model, 'last_xi_mean', '')}",
                     f"{getattr(model, 'last_rX_max', '')}",
                     f"{getattr(model, 'last_rP_max', '')}",
