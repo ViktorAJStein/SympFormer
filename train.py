@@ -83,14 +83,14 @@ def cosine_lr(step: int, warmup_steps: int, total_steps: int, peak: float, min_r
     return peak * (min_ratio + (1.0 - min_ratio) * cosine)
 
 
-def build_optimizer(model: nn.Module, peak_lr: float, betas=(0.9, 0.95)):
+def build_optimizer(model: nn.Module, peak_lr: float, betas=(0.9, 0.95), scalar_lr_mult: float = 10.0):
     # Parameter grouping following YuriiFormer Appendix A.3 (AdamW side):
     # - embeddings: weight decay 0.1
     # - norms: weight decay 0
     # - learned scalar update-rule params: weight decay 0, lr multiplier 5x
     # - everything else: weight decay 0 (Muon would handle matrix weights in the paper; here we keep AdamW wd=0)
     decay_emb = 0.1
-    scalar_mult = 5.0
+    scalar_mult = scalar_lr_mult
 
     emb_params = []
     norm_params = []
@@ -162,6 +162,20 @@ def main():
         help="model architecture / attention discretization",
     )
 
+    ap.add_argument(
+        "--no_mlp",
+        action="store_true",
+        help="Skip the MLP substep entirely in all architectures. "
+             "Use this to isolate the effect of the different attention blocks.",
+    )
+    ap.add_argument(
+        "--scalar_lr_mult",
+        type=float,
+        default=10.0,
+        help="LR multiplier for learned scalar parameters (ConstrainedScalar .raw, theta_h, theta_xi_raw). "
+             "Higher values let the scalars update faster and diverge more across layers. Default: 10.0",
+    )
+
     # ---- learned integrator scalars toggles ----
     ap.add_argument("--learn_h", type=int, default=1,
                     help="If 1, learn the integrator step size h (theta_h is trainable). If 0, keep it fixed.")
@@ -218,6 +232,14 @@ def main():
         "--presymp_mlp_use_attn_vel",
         action="store_true",
         help="Presymp only: use v_attn ≈ (X_after_attn - X_before_attn)/h as the velocity in the MLP lookahead (Variant A).",
+    )
+    # Variant B: use P (symplectic momentum) as the shared MLP velocity (YuriiFormer Lie-Trotter style)
+    ap.add_argument(
+        "--presymp_mlp_use_p_vel",
+        action="store_true",
+        help="Presymp only: use P from the attention step as velocity for the MLP substep (Variant B). "
+             "The MLP updates P in-place; updated P flows to the next layer's attention. "
+             "Mutually exclusive with --presymp_mlp_use_attn_vel.",
     )
 
 
@@ -310,6 +332,7 @@ def main():
             noise_loc=args.yurii_noise_loc,
             restart_mode=args.yurii_restart,
             restart_min_layer=args.yurii_restart_min_layer,
+            no_mlp=args.no_mlp,
         )
     else:
         # Presymp family: same overall architecture, different attention discretization
@@ -342,6 +365,8 @@ def main():
                 # xi_adapt_warmup=args.presymp_xi_adapt_warmup,
                 # xi_adapt_every=args.presymp_xi_adapt_every,
                 mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+                mlp_use_p_vel=args.presymp_mlp_use_p_vel,
+                no_mlp=args.no_mlp,
             )
         elif args.arch == "presymp_euler":
             model = PresympModel(
@@ -372,6 +397,8 @@ def main():
                 # xi_adapt_warmup=args.presymp_xi_adapt_warmup,
                 # xi_adapt_every=args.presymp_xi_adapt_every,
                 mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+                mlp_use_p_vel=args.presymp_mlp_use_p_vel,
+                no_mlp=args.no_mlp,
             )
         elif args.arch == "presymp_exp_euler":
             model = PresympModel(
@@ -402,6 +429,8 @@ def main():
                 # xi_adapt_warmup=args.presymp_xi_adapt_warmup,
                 # xi_adapt_every=args.presymp_xi_adapt_every,
                 mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+                mlp_use_p_vel=args.presymp_mlp_use_p_vel,
+                no_mlp=args.no_mlp,
             )
         elif args.arch == "presymp_ab2":
             model = PresympModelAB2(
@@ -420,6 +449,8 @@ def main():
                 presymp_lnp=args.presymp_lnp,
                 use_v0_init=(not args.no_v0_init),
                 mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+                mlp_use_p_vel=args.presymp_mlp_use_p_vel,
+                no_mlp=args.no_mlp,
             )
         elif args.arch == "presymp_etd_ab2":
             model = PresympModelETDAB2(
@@ -438,6 +469,8 @@ def main():
                 presymp_lnp=args.presymp_lnp,
                 use_v0_init=(not args.no_v0_init),
                 mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+                mlp_use_p_vel=args.presymp_mlp_use_p_vel,
+                no_mlp=args.no_mlp,
             )
         elif args.arch == "presymp_strang":
             model = PresympModel(
@@ -468,6 +501,8 @@ def main():
                 # xi_adapt_warmup=args.presymp_xi_adapt_warmup,
                 # xi_adapt_every=args.presymp_xi_adapt_every,
                 mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+                mlp_use_p_vel=args.presymp_mlp_use_p_vel,
+                no_mlp=args.no_mlp,
             )
         else:
             raise ValueError(f"Unknown arch: {args.arch}")
@@ -487,7 +522,7 @@ def main():
         #     args.presymp_xi_adapt = False
 
 
-    opt = build_optimizer(model, peak_lr=args.peak_lr, betas=tuple(args.betas))
+    opt = build_optimizer(model, peak_lr=args.peak_lr, betas=tuple(args.betas), scalar_lr_mult=args.scalar_lr_mult)
 
     start_step = 0
     best_val = float("inf")
@@ -507,7 +542,7 @@ def main():
     # tokens_cum: cumulative tokens processed since step 0
     ensure_csv_header(
         metrics_path,
-        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "xi_mean", "rX", "rP"],
+        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "xi_mean", "rX", "rP", "c_log_mean", "c_lin_mean"],
     )
     plot_path = os.path.join(run_dir, "loss.png")
 
@@ -557,7 +592,7 @@ def main():
             if args.arch == "yurii_lt" and args.yurii_restart != "none":
                 extra = f" | restarts {restarts_accum}"
             if args.arch.startswith("presymp") and hasattr(model, "last_xi_mean"):
-                extra += f" | h_mean {getattr(model, 'last_h_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e}"
+                extra += f" | h_mean {getattr(model, 'last_h_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e} | c_log {getattr(model, 'last_c_log_mean', float('nan')):.4g} | c_lin {getattr(model, 'last_c_lin_mean', float('nan')):.4g}"
             print(
                 f"[{args.arch}] step {step:6d} | loss {loss_accum:.4f} | lr {lr:.2e} | "
                 f"toks/step {toks_per_step} | wall_dt {dt:.2f}s | wall {wall_cum:.1f}s{extra}"
@@ -577,6 +612,8 @@ def main():
                     f"{getattr(model, 'last_xi_mean', '')}",
                     f"{getattr(model, 'last_rX_max', '')}",
                     f"{getattr(model, 'last_rP_max', '')}",
+                    f"{getattr(model, 'last_c_log_mean', '')}",
+                    f"{getattr(model, 'last_c_lin_mean', '')}",
                 ],
             )
 
@@ -598,6 +635,8 @@ def main():
                     f"{getattr(model, 'last_xi_mean', '')}",
                     f"{getattr(model, 'last_rX_max', '')}",
                     f"{getattr(model, 'last_rP_max', '')}",
+                    f"{getattr(model, 'last_c_log_mean', '')}",
+                    f"{getattr(model, 'last_c_lin_mean', '')}",
                 ],
             )
             # checkpoint best

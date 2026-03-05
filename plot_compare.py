@@ -117,6 +117,19 @@ def _latexize_params_in_label(label: str) -> str:
     return s
 
 
+def extract_eta_series(rows: List[Dict[str, str]]) -> Tuple[List[float], List[float], List[float]]:
+    """Return (steps, c_log_vals, c_lin_vals) from rows that have non-empty eta coef columns."""
+    steps, c_log_vals, c_lin_vals = [], [], []
+    for row in rows:
+        cl = _to_float(row.get("c_log_mean", ""))
+        cm = _to_float(row.get("c_lin_mean", ""))
+        if cl is not None or cm is not None:
+            steps.append(float(int(row.get("step", "0"))))
+            c_log_vals.append(cl if cl is not None else float('nan'))
+            c_lin_vals.append(cm if cm is not None else float('nan'))
+    return steps, c_log_vals, c_lin_vals
+
+
 def summarize_val(rows: List[Dict[str, str]]) -> Tuple[Optional[float], Optional[float], float, int]:
     """
     Returns (last_val, best_val, wall_seconds, last_step).
@@ -179,7 +192,7 @@ def print_latex_table(labels: List[str],
     print(r"\begin{table}[H]")
     print(r"    \centering")
     print(r"    \begin{tabular}{c|c|c|c}")
-    print(r"        model       & last ($\downarrow$)      & best ($\downarrow$)     & time (seconds) ($\downarrow$) \\\ \hline")
+    print(r"        \textbf{model}       & \textbf{last} ($\downarrow$)      & \textbf{best} ($\downarrow$)     & \textbf{wall clock time} (seconds) ($\downarrow$) \\ \hline")
     for lab, (last_v, best_v, wall_s, _) in zip(labels, summaries):
         row_lab = lab if labels_are_latex else _escape_latex_minimal(_latexize_params_in_label(lab))
         print(f"        {row_lab}    & {fmt(last_v, min_last)}                   & {fmt(best_v, min_best)}                & {fmt_time(wall_s)} \\\\")
@@ -276,6 +289,44 @@ def main():
         if caption is None:
             caption = f"Validation loss summary after {max_step_all} optimization steps."
         print_latex_table(labels, summaries, caption, labels_are_latex)
+
+    # --- Eta coefficient plots (c_log, c_lin) ---
+    # Collect eta data across all runs; skip if none have it.
+    eta_data = []
+    for i, run_dir in enumerate(args.runs):
+        mpath = os.path.join(run_dir, "metrics.csv")
+        rows = read_metrics(mpath)
+        steps, c_log_vals, c_lin_vals = extract_eta_series(rows)
+        label = args.labels[i] if args.labels is not None else os.path.basename(run_dir.rstrip("/"))
+        eta_data.append((label, steps, c_log_vals, c_lin_vals))
+
+    has_eta = any(len(d[1]) > 0 for d in eta_data)
+    if has_eta:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4))
+        for label, steps, c_log_vals, c_lin_vals in eta_data:
+            if not steps:
+                continue
+            import math as _math
+            valid_log = [v for v in c_log_vals if not _math.isnan(v)]
+            valid_lin = [v for v in c_lin_vals if not _math.isnan(v)]
+            if valid_log:
+                ax1.plot(steps, c_log_vals, label=label)
+            if valid_lin:
+                ax2.plot(steps, c_lin_vals, label=label)
+        ax1.set_xlabel("optimizer step")
+        ax1.set_ylabel("$c_{\\log}$ (mean over layers)")
+        ax1.set_title("Eta log coefficient $c_{\\log}$")
+        ax1.legend(fontsize=7, frameon=True)
+        ax2.set_xlabel("optimizer step")
+        ax2.set_ylabel("$c_{\\mathrm{lin}}$ (mean over layers)")
+        ax2.set_title("Eta linear coefficient $c_{\\mathrm{lin}}$")
+        ax2.legend(fontsize=7, frameon=True)
+        plt.tight_layout()
+        base, ext = os.path.splitext(args.out)
+        eta_out = base + "_eta" + ext
+        plt.savefig(eta_out, dpi=180)
+        plt.close()
+        print(f"saved {eta_out}")
 
 
 if __name__ == "__main__":
