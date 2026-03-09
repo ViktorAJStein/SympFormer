@@ -106,8 +106,9 @@ class MLP(nn.Module):
 
 class GPTBlock(nn.Module):
     '''Baseline block: x += Attn(LN(x)); x += MLP(LN(x)).'''
-    def __init__(self, cfg: ModelConfig):
+    def __init__(self, cfg: ModelConfig, no_mlp: bool = False):
         super().__init__()
+        self.no_mlp = bool(no_mlp)
         self.ln_1 = LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.attn = CausalSelfAttention(cfg)
         self.ln_2 = LayerNorm(cfg.n_embd, bias=cfg.bias)
@@ -115,7 +116,8 @@ class GPTBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.ln_1(x))
-        x = x + self.mlp(self.ln_2(x))
+        if not self.no_mlp:
+            x = x + self.mlp(self.ln_2(x))
         return x
 
 
@@ -416,14 +418,22 @@ class PresymplecticSoftmaxAttention(nn.Module):
         eps: float = 1e-8,
         causal: bool = True,
         presymp_lnp: str = "end",
+        lookahead: bool = False,
     ):
         super().__init__()
         self.cfg = cfg
+        self.lookahead = bool(lookahead)
 
-        # Learned step size and coupling (positive), with smooth theta_max cap for xi:
-        #   h = softplus(theta_h) > 0
-        #   xi = (theta_max/(2h)) * sigmoid(theta_xi_raw)  in (0, theta_max/(2h)) if theta_max>0
-        self.theta_h = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        # Separate learned step sizes for position (X) and momentum (P):
+        #   hX = softplus(theta_hX) > 0  — governs position updates  dot X = F(X,P)
+        #   hY = softplus(theta_hY) > 0  — governs momentum updates  dot P = G(X,P) - alpha P
+        # Both initialised to h so behaviour is unchanged when h_X = h_Y.
+        # h() is kept as an alias for hX() for backward-compat with logging/AB2 code.
+        #   xi = (theta_max/(2*hX)) * sigmoid(theta_xi_raw)
+        self.theta_hX = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.theta_hY = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        # Legacy alias so that external callers of .theta_h still work.
+        self.theta_h = self.theta_hX
         self.theta_xi_raw = nn.Parameter(torch.tensor(0.0, dtype=torch.float32))  # initialized below
         # self.xi_adapt = bool(xi_adapt)
         self.r_thresh = float(r_thresh)
@@ -472,6 +482,12 @@ class PresymplecticSoftmaxAttention(nn.Module):
         # Standard attention projections (not enforcing Q=K symmetry)
         self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
         self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
+        # B matrix: F-oracle is  dot X_i = B P_i / z_i
+        # Theory: B = Sym(V A^{-1}).  We parametrise freely; identity init = previous behaviour.
+        self.c_B = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        nn.init.eye_(self.c_B.weight)
+        # Lookahead coefficient: oracle evaluated at X + mu_la * P.  Init near 0 = no-op.
+        self.mu_la = ConstrainedScalar(0.001, "unit")
         self.attn_drop = nn.Dropout(cfg.dropout)
         self.resid_drop = nn.Dropout(cfg.dropout)
 
@@ -487,12 +503,25 @@ class PresymplecticSoftmaxAttention(nn.Module):
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         return q, k, v
 
-    def h(self, device=None, dtype=None):
-        h = F.softplus(self.theta_h)
+    def hX(self, device=None, dtype=None):
+        """Step size for position updates  X^{k+1} = X^k + hX * vel."""
+        h = F.softplus(self.theta_hX)
         if device is not None or dtype is not None:
             h = h.to(device=device if device is not None else h.device,
                      dtype=dtype if dtype is not None else h.dtype)
         return h
+
+    def hY(self, device=None, dtype=None):
+        """Step size for momentum updates  P^{k+1} = P^k + hY * force."""
+        h = F.softplus(self.theta_hY)
+        if device is not None or dtype is not None:
+            h = h.to(device=device if device is not None else h.device,
+                     dtype=dtype if dtype is not None else h.dtype)
+        return h
+
+    def h(self, device=None, dtype=None):
+        """Backward-compat alias for hX() — used by logging and schedule indexing."""
+        return self.hX(device=device, dtype=dtype)
 
     def xi(self, h, device=None, dtype=None):
         if not torch.is_tensor(h):
@@ -544,15 +573,21 @@ class PresymplecticSoftmaxAttention(nn.Module):
         return out.to(dtype=P.dtype)
 
 
+    def _la_input(self, X: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+        """Return oracle evaluation point: X + mu_la*p when lookahead is on, else X."""
+        if not self.lookahead:
+            return X
+        return X + self.mu_la() * p
+
     def _vel(self, t: float, X: torch.Tensor, Pi: torch.Tensor) -> torch.Tensor:
         device, dtype = X.device, X.dtype
         lam = self.sched.exp_minus_eta(t, device, dtype)
         p = lam * Pi
 
-        x_ln = self.ln(X)
+        x_ln = self.ln(self._la_input(X, p))
         q, k, _ = self._qkv(x_ln)
         _, z = self._kernel_E_z(q, k)
-        return p / z.unsqueeze(-1)
+        return self.c_B(p) / z.unsqueeze(-1)
 
     def _force(self, t: float, X: torch.Tensor, Pi: torch.Tensor) -> torch.Tensor:
         device, dtype = X.device, X.dtype
@@ -560,7 +595,7 @@ class PresymplecticSoftmaxAttention(nn.Module):
         lam = self.sched.exp_minus_eta(t, device, dtype)
         p = lam * Pi  # physical momentum
 
-        x_ln = self.ln(X)
+        x_ln = self.ln(self._la_input(X, p))
         q, k, v = self._qkv(x_ln)
         E, z = self._kernel_E_z(q, k)
 
@@ -588,12 +623,12 @@ class PresymplecticSoftmaxAttention(nn.Module):
         lam = self.sched.exp_minus_eta(t, device, dtype)
         p = lam * Pi  # physical momentum
 
-        x_ln = self.ln(X)
+        x_ln = self.ln(self._la_input(X, p))
         q, k, v = self._qkv(x_ln)
         E, z = self._kernel_E_z(q, k)
 
-        # velocity: dot X = p / z
-        vel = p / z.unsqueeze(-1)
+        # velocity: dot X_i = B p_i / z_i  (B = c_B; lookahead shifts evaluation point)
+        vel = self.c_B(p) / z.unsqueeze(-1)
 
         # force: dot Pi = Lam * G(X, p)
         a = (p * p).sum(dim=-1)
@@ -609,9 +644,12 @@ class PresymplecticSoftmaxAttention(nn.Module):
 
     def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
         device, dtype = Xk.device, Xk.dtype
-        h_t = self.h(device=device, dtype=dtype)       # tensor — stays in graph for tau multiplications
-        h_f = h_t.detach().cpu().item()                # float — only used for schedule time index
-        tau = 0.5 * h_t                                # tensor
+        h_x = self.hX(device=device, dtype=dtype)      # position step size tensor
+        h_y = self.hY(device=device, dtype=dtype)      # momentum step size tensor
+        # Use hX for schedule time-indexing and for the phi_C coupling angle.
+        h_f = h_x.detach().cpu().item()
+        tau_x = 0.5 * h_x                              # position substep
+        tau_y = 0.5 * h_y                              # momentum substep
         t0 = self.sched.t0
         tk = t0 + float(k) * h_f
         tk1 = tk + h_f
@@ -625,25 +663,25 @@ class PresymplecticSoftmaxAttention(nn.Module):
         bar_X = Xk
         bar_Pi = Pi
 
-        # coupling: keep xi as tensor so gradient reaches theta_xi_raw
-        xi_t = self.xi(h=h_t, device=device, dtype=dtype)  # tensor
-        theta = 2.0 * xi_t * h_t                           # tensor
+        # coupling: xi and rotation angle use hX (the position scale)
+        xi_t = self.xi(h=h_x, device=device, dtype=dtype)  # tensor
+        theta = 2.0 * xi_t * h_x                           # tensor
         c = torch.cos(theta)                                # tensor (scalar)
         s = torch.sin(theta)                                # tensor (scalar)
 
-        # phi_A^{tau}: single oracle at (t, X, bar_Pi)
+        # phi_A^{tau}: single oracle at (t, X, bar_Pi) — momentum half-step
         vel, force = self._oracle(t, X, bar_Pi)
-        Pi = Pi + tau * force
+        Pi = Pi + tau_y * force
         if self.presymp_lnp == "each_substep":
             Pi = self._apply_lnp(Pi)
         bar_t = bar_t + h_f * 0.5
-        bar_X = bar_X + tau * vel
+        bar_X = bar_X + tau_x * vel
 
-        # phi_B^{tau}: single oracle at (bar_t, bar_X, Pi)
+        # phi_B^{tau}: single oracle at (bar_t, bar_X, Pi) — position half-step
         t = t + h_f * 0.5
         vel, force = self._oracle(bar_t, bar_X, Pi)
-        X = X + tau * vel
-        bar_Pi = bar_Pi + tau * force
+        X = X + tau_x * vel
+        bar_Pi = bar_Pi + tau_y * force
         if self.presymp_lnp == "each_substep":
             bar_Pi = self._apply_lnp(bar_Pi)
 
@@ -665,14 +703,14 @@ class PresymplecticSoftmaxAttention(nn.Module):
         # phi_B^{tau}: single oracle at (bar_t, bar_X, Pi) — post-phi_C states
         t = t + h_f * 0.5
         vel, force = self._oracle(bar_t, bar_X, Pi)
-        X = X + tau * vel
-        bar_Pi = bar_Pi + tau * force
+        X = X + tau_x * vel
+        bar_Pi = bar_Pi + tau_y * force
 
         # phi_A^{tau}: single oracle at (t, X, bar_Pi) — post-phi_B states
         vel, force = self._oracle(t, X, bar_Pi)
-        Pi = Pi + tau * force
+        Pi = Pi + tau_y * force
         bar_t = bar_t + h_f * 0.5
-        bar_X = bar_X + tau * vel
+        bar_X = bar_X + tau_x * vel
 
         lam_tk1 = self.sched.exp_minus_eta(tk1, device, dtype)
         Pk1_raw = lam_tk1 * Pi
@@ -721,10 +759,16 @@ class DampedEulerAttention(nn.Module):
         eps: float = 1e-8,
         causal: bool = True,
         presymp_lnp: str = "end",
+        lookahead: bool = False,
     ):
         super().__init__()
         self.cfg = cfg
-        self.theta_h = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.lookahead = bool(lookahead)
+        # Separate learned step sizes for position (X) and momentum (P).
+        self.theta_hX = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.theta_hY = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        # Legacy alias: keeps .theta_h attribute intact for any external code.
+        self.theta_h = self.theta_hX
         self.eps = float(eps)
         self.causal = bool(causal)
 
@@ -742,6 +786,9 @@ class DampedEulerAttention(nn.Module):
 
         self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
         self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
+        self.c_B = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        nn.init.eye_(self.c_B.weight)
+        self.mu_la = ConstrainedScalar(0.001, "unit")
         self.attn_drop = nn.Dropout(cfg.dropout)
         self.resid_drop = nn.Dropout(cfg.dropout)
 
@@ -760,15 +807,30 @@ class DampedEulerAttention(nn.Module):
         v = v.view(B, T, self.n_head, self.head_dim).transpose(1, 2)
         return q, k, v
 
-    def h(self, device=None, dtype=None):
-        h = F.softplus(self.theta_h)
+    def hX(self, device=None, dtype=None):
+        """Step size for position updates  X^{k+1} = X^k + hX * F(X,P)."""
+        h = F.softplus(self.theta_hX)
         if device is not None or dtype is not None:
             h = h.to(device=device if device is not None else h.device,
                      dtype=dtype if dtype is not None else h.dtype)
         return h
 
+    def hY(self, device=None, dtype=None):
+        """Step size for momentum updates  P^{k+1} = P^k + hY * (...)."""
+        h = F.softplus(self.theta_hY)
+        if device is not None or dtype is not None:
+            h = h.to(device=device if device is not None else h.device,
+                     dtype=dtype if dtype is not None else h.dtype)
+        return h
+
+    def h(self, device=None, dtype=None):
+        """Backward-compat alias for hX()."""
+        return self.hX(device=device, dtype=dtype)
 
     def _kernel_E_z(self, q: torch.Tensor, k: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Compute E_ij = exp(<q_i, k_j>/sqrt(d)) and z_i = mean_j E_ij.
+        We aggregate heads by averaging the score matrices over heads, yielding a single (B,T,T) kernel.
+        """
         B, nh, T, _ = q.shape
         S = (q @ k.transpose(-2, -1)) * self.scale  # (B, nh, T, T)
         if self.causal:
@@ -788,15 +850,21 @@ class DampedEulerAttention(nn.Module):
             return P
         out = self.ln_p(P.float())
         return out.to(dtype=P.dtype)
+    def _la_input(self, X: torch.Tensor, P: torch.Tensor) -> torch.Tensor:
+        """Return oracle evaluation point: X + mu_la*P when lookahead is on, else X."""
+        if not self.lookahead:
+            return X
+        return X + self.mu_la() * P
+
     def _F_E_z_vmerge(self, X: torch.Tensor, P: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Return (F, E, z, v_merge) at (X,P), where F=dot X, E=exp(score), z is row normalizer.
-        # This computes QKV and the kernel once.
-        x_ln = self.ln(X)
+        # Returns (F, E, z, v_merge). When lookahead=True, QKV and hence
+        # z and G are evaluated at X + mu_la*P instead of X.
+        x_ln = self.ln(self._la_input(X, P))
         q, k, v = self._qkv(x_ln)
         E, z = self._kernel_E_z(q, k)
         B, T, C = X.shape
         v_merge = v.transpose(1, 2).contiguous().view(B, T, C)
-        Fv = P / z.unsqueeze(-1)
+        Fv = self.c_B(P) / z.unsqueeze(-1)
         return Fv, E, z, v_merge
 
     def _G_from_cache(self, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor, v_merge: torch.Tensor) -> torch.Tensor:
@@ -826,17 +894,16 @@ class DampedEulerAttention(nn.Module):
 
     def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
         device, dtype = Xk.device, Xk.dtype
-        # note: we use a scalar h for the schedule evaluation here
-        h_t = self.h()                    # tensor — stays in graph
-        h_f = h_t.detach().item()         # float — only for schedule time index
-        tk = self.sched.t0 + float(k) * h_f
+        hX_t = self.hX()               # tensor for position update — keeps gradient
+        hY_t = self.hY()               # tensor for momentum update
+        hX_f = hX_t.detach().item()    # float — schedule time indexing only
 
         Fv, Gv, z, alpha = self.FG_alpha(Xk, Pk, k)
-        Xk1 = Xk + h_t * Fv
-        Pk1 = Pk + h_t * (Gv - alpha * Pk)
+        Xk1 = Xk + hX_t * Fv
+        Pk1 = Pk + hY_t * (Gv - alpha * Pk)
         if self.presymp_lnp != "none":
             Pk1 = self._apply_lnp(Pk1)
-        self.last_h = h_f
+        self.last_h = hX_f
         return Xk1, Pk1
 
 
@@ -845,33 +912,70 @@ class DampedEulerAttention(nn.Module):
 class DampedExpEulerAttention(DampedEulerAttention):
     # Integrating-factor / exponential Euler discretization of the damped system.
     # Treat damping exactly over one step using sigma = exp(-(eta(t+h)-eta(t))).
+    # hX governs the position update; hY governs the momentum update (and sigma).
 
     def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
         device, dtype = Xk.device, Xk.dtype
-        h_t = self.h()                    # tensor — stays in graph
-        h_f = h_t.detach().item()         # float — only for schedule time index
-        tk = self.sched.t0 + float(k) * h_f
+        hX_t = self.hX()               # position step size (tensor)
+        hY_t = self.hY()               # momentum step size (tensor)
+        hX_f = hX_t.detach().item()    # float — schedule time indexing only
+        hY_f = hY_t.detach().item()    # float — delta_eta integral interval
+        tk = self.sched.t0 + float(k) * hX_f
 
-        # one oracle call at (Xk,Pk)
-        _Fv, Gv, z, _alpha = self.FG_alpha(Xk, Pk, k)
+        # one oracle call at (Xk, Pk); Fv already incorporates c_B and the lookahead point.
+        Fv, Gv, z, _alpha = self.FG_alpha(Xk, Pk, k)
 
-        d_eta = self.sched.delta_eta(tk, h_f, device, dtype)
+        # Exact discrete damping over interval hY
+        d_eta = self.sched.delta_eta(tk, hY_f, device, dtype)
         sigma = torch.exp(-d_eta)
-        denom = h_t.clamp(min=1e-8)       # tensor — keeps gradient path to theta_h
+        denom = hY_t.clamp(min=1e-8)   # tensor — keeps gradient path to theta_hY
         alpha_eff = d_eta / denom
         eps = torch.tensor(1e-8, device=device, dtype=dtype)
-        w = torch.where(alpha_eff.abs() > eps, (1.0 - sigma) / alpha_eff, h_t)
+        w = torch.where(alpha_eff.abs() > eps, (1.0 - sigma) / alpha_eff, hY_t)
 
         Pk1 = sigma * Pk + w * Gv
-        # Position update uses the OLD momentum p^(k), matching the exponential Euler
-        # formula in the paper: q^(k+1) = q^(k) + h ∇_p H(q^(k), p^(k)).
-        # Using Pk1 here would be a semi-implicit scheme and would systematically
-        # under-step x because Pk1 has already been damped by sigma < 1.
-        Xk1 = Xk + h_t * (Pk / z.unsqueeze(-1))
+        # Position uses old momentum (exponential Euler: p^k, not p^{k+1}).
+        Xk1 = Xk + hX_t * Fv
         if self.presymp_lnp != "none":
             Pk1 = self._apply_lnp(Pk1)
-        self.last_h = h_f
+        self.last_h = hX_f
         return Xk1, Pk1
+
+class PlainEulerAttention(DampedEulerAttention):
+    """Non-symplectic plain explicit Euler discretization of the damped Hamiltonian.
+
+    Eq. (plain_explicit_Euler) in the paper:
+        q^{k+1} = q^k + h  F(q^k, p^k)
+        p^{k+1} = alpha_k * p^k + h G(q^k, p^k)
+
+    alpha_k is a learned per-layer scalar in (0,1) (ConstrainedScalar "unit").
+    Unlike the conformally-symplectic Euler, the position update here uses p^k
+    rather than p^{k+1}, so the step has NO geometric structure preservation.
+    """
+
+    def __init__(self, *args, alpha_init: float = 0.9, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Learned multiplicative damping coefficient in (0,1).
+        self.alpha_plain = ConstrainedScalar(alpha_init, "unit")
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX()
+        hY_t = self.hY()
+        hX_f = hX_t.detach().item()
+
+        Fv, Gv, _z, _alpha = self.FG_alpha(Xk, Pk, k)
+
+        # Plain Euler: both position and momentum use state at step k (no geometric structure)
+        Xk1 = Xk + hX_t * Fv
+        alpha_k = self.alpha_plain()      # learned scalar in (0,1)
+        Pk1 = alpha_k * Pk + hY_t * Gv
+
+        if self.presymp_lnp != "none":
+            Pk1 = self._apply_lnp(Pk1)
+        self.last_h = hX_f
+        return Xk1, Pk1
+
 class HalfDampStrangAttention(nn.Module):
     """Half-damping Strang splitting for the damped system.
 
@@ -904,9 +1008,11 @@ class HalfDampStrangAttention(nn.Module):
         eps: float = 1e-8,
         causal: bool = True,
         presymp_lnp: str = "end",
+        lookahead: bool = False,
     ):
         super().__init__()
         self.cfg = cfg
+        self.lookahead = bool(lookahead)
 
         self.theta_h = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
         self.theta_xi_raw = nn.Parameter(torch.tensor(0.0, dtype=torch.float32))
@@ -937,6 +1043,9 @@ class HalfDampStrangAttention(nn.Module):
 
         self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
         self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
+        self.c_B = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        nn.init.eye_(self.c_B.weight)
+        self.mu_la = ConstrainedScalar(0.001, "unit")
         self.attn_drop = nn.Dropout(cfg.dropout)
         self.resid_drop = nn.Dropout(cfg.dropout)
 
@@ -999,14 +1108,22 @@ class HalfDampStrangAttention(nn.Module):
         return out.to(dtype=P.dtype)
 
 
+    def _la_input(self, X: torch.Tensor, P: torch.Tensor) -> torch.Tensor:
+        """Return oracle evaluation point: X + mu_la*P when lookahead is on, else X."""
+        if not self.lookahead:
+            return X
+        return X + self.mu_la() * P
+
     def _velH(self, X: torch.Tensor, P: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return (F, E, z, v_merge) for conservative dynamics."""
-        x_ln = self.ln(X)
+        """Return (F, E, z, v_merge) for conservative dynamics.
+        When lookahead=True, QKV is evaluated at X + mu_la*P.
+        """
+        x_ln = self.ln(self._la_input(X, P))
         q, k, v = self._qkv(x_ln)
         E, z = self._kernel_E_z(q, k)
         B, T, C = X.shape
         v_merge = v.transpose(1, 2).contiguous().view(B, T, C)
-        Fv = P / z.unsqueeze(-1)
+        Fv = self.c_B(P) / z.unsqueeze(-1)
         return Fv, E, z, v_merge
 
     def _forH(self, X: torch.Tensor, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor, v_merge: torch.Tensor) -> torch.Tensor:
@@ -1110,6 +1227,7 @@ class PresympGPTBlock(nn.Module):
         mlp_use_p_vel: bool = False,
         no_mlp: bool = False,
         attn_scheme: str = "presymp",
+        lookahead: bool = False,
         h: float = 1.0,
         xi: float = 1.0,
         t0: float = 1.0,
@@ -1141,6 +1259,7 @@ class PresympGPTBlock(nn.Module):
         self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
         self.mlp_use_p_vel = bool(mlp_use_p_vel)
         self.no_mlp = bool(no_mlp)
+        self.lookahead = bool(lookahead)
         attn_scheme = str(attn_scheme)
         if attn_scheme == "presymp":
             self.attn = PresymplecticSoftmaxAttention(
@@ -1168,6 +1287,7 @@ class PresympGPTBlock(nn.Module):
                 eta_init=eta_init,
                 eta_clip=eta_clip,
                 presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
             )
         elif attn_scheme == "euler":
             self.attn = DampedEulerAttention(
@@ -1184,6 +1304,7 @@ class PresympGPTBlock(nn.Module):
                 eta_init=eta_init,
                 eta_clip=eta_clip,
                 presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
             )
         elif attn_scheme == "exp_euler":
             self.attn = DampedExpEulerAttention(
@@ -1200,6 +1321,7 @@ class PresympGPTBlock(nn.Module):
                 eta_init=eta_init,
                 eta_clip=eta_clip,
                 presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
             )
         elif attn_scheme == "strang":
             self.attn = HalfDampStrangAttention(
@@ -1218,9 +1340,27 @@ class PresympGPTBlock(nn.Module):
                 eta_init=eta_init,
                 eta_clip=eta_clip,
                 presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
+            )
+        elif attn_scheme == "plain_euler":
+            self.attn = PlainEulerAttention(
+                cfg,
+                h=h,
+                t0=t0,
+                eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+                eta_mode=eta_mode,
+                eta_init=eta_init,
+                eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
             )
         else:
-            raise ValueError("attn_scheme must be one of {'presymp','euler','exp_euler','strang'}")
+            raise ValueError("attn_scheme must be one of {'presymp','euler','exp_euler','strang','plain_euler'}")
 
         # MLP substep (accelerated)
         self.ln_x_mlp = LayerNorm(cfg.n_embd, bias=cfg.bias)
@@ -1348,6 +1488,7 @@ class PresympModelAB2(nn.Module):
         mlp_use_attn_vel: bool = False,
         mlp_use_p_vel: bool = False,
         no_mlp: bool = False,
+        lookahead: bool = False,
     ):
         super().__init__()
         if mlp_use_attn_vel and mlp_use_p_vel:
@@ -1358,6 +1499,7 @@ class PresympModelAB2(nn.Module):
         self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
         self.mlp_use_p_vel = bool(mlp_use_p_vel)
         self.no_mlp = bool(no_mlp)
+        self.lookahead = bool(lookahead)
 
         self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
@@ -1382,6 +1524,7 @@ class PresympModelAB2(nn.Module):
                 eta_init=eta_init,
                 eta_clip=eta_clip,
                 presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
             )
             for _ in range(cfg.n_layer)
         ])
@@ -1432,7 +1575,8 @@ class PresympModelAB2(nn.Module):
         dp_prev = None
 
         for k in range(self.cfg.n_layer):
-            h_k = self.attn[k].h()  # learned scalar tensor, kept in graph
+            hX_k = self.attn[k].hX()  # position step size (tensor)
+            hY_k = self.attn[k].hY()  # momentum step size (tensor)
             dx_k, dp_k = self.attn[k].rhs(x, p, k)
             if k == 0 or dx_prev is None:
                 dx_eff, dp_eff = dx_k, dp_k
@@ -1440,12 +1584,12 @@ class PresympModelAB2(nn.Module):
                 dx_eff = 1.5 * dx_k - 0.5 * dx_prev
                 dp_eff = 1.5 * dp_k - 0.5 * dp_prev
 
-            x_new = x + h_k * dx_eff
-            p_new = p + h_k * dp_eff
+            x_new = x + hX_k * dx_eff
+            p_new = p + hY_k * dp_eff
             if self.attn[k].presymp_lnp != "none":
                 p_new = self.attn[k]._apply_lnp(p_new)
 
-            v_attn = (x_new - x) / h_k.clamp(min=1e-8)
+            v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
             x, p = x_new, p_new
             dx_prev, dp_prev = dx_k, dp_k
 
@@ -1502,13 +1646,14 @@ class PresympModelETDAB2(PresympModelAB2):
         H_prev = None
 
         for k in range(self.cfg.n_layer):
-            h_k = self.attn[k].h()  # learned scalar tensor, kept in graph
-            h_k_f = h_k.detach().item()  # Python float for time index only
+            hX_k = self.attn[k].hX()           # position step size (tensor)
+            hY_k = self.attn[k].hY()           # momentum step size (tensor)
+            hX_k_f = hX_k.detach().item()      # float — time index and Lam interval
             Fv, Gv, z, _alpha = self.attn[k].FG_alpha(x, p, k)
-            tk = self.attn[k].sched.t0 + float(k) * h_k_f
+            tk = self.attn[k].sched.t0 + float(k) * hX_k_f
             device, dtype = x.device, x.dtype
             Lam_k = self.attn[k].sched.exp_eta(tk, device, dtype)
-            Lam_k1 = self.attn[k].sched.exp_eta(tk + h_k_f, device, dtype)
+            Lam_k1 = self.attn[k].sched.exp_eta(tk + hX_k_f, device, dtype)
 
             Pi = Lam_k * p
             H_k = Lam_k * Gv
@@ -1518,14 +1663,14 @@ class PresympModelETDAB2(PresympModelAB2):
             else:
                 H_eff = 1.5 * H_k - 0.5 * H_prev
 
-            Pi_new = Pi + h_k * H_eff
+            Pi_new = Pi + hY_k * H_eff         # momentum update uses hY
             p_new = Pi_new / Lam_k1
 
-            x_new = x + h_k * (p_new / z.unsqueeze(-1))
+            x_new = x + hX_k * (self.attn[k].c_B(p_new) / z.unsqueeze(-1))  # position uses hX
             if self.attn[k].presymp_lnp != "none":
                 p_new = self.attn[k]._apply_lnp(p_new)
 
-            v_attn = (x_new - x) / h_k.clamp(min=1e-8)
+            v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
             x, p = x_new, p_new
             H_prev = H_k
 
@@ -1558,15 +1703,592 @@ class PresympModelETDAB2(PresympModelAB2):
         return logits, loss
 
 
-class GPTModel(nn.Module):
-    def __init__(self, cfg: ModelConfig):
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Linear-attention helpers and architectures
+# Particle system (Proposition prop:add, eq. acc_linear_matrix):
+#   dot X = (1/N) X A X^T Y
+#   dot Y = -alpha Y  - (1/N) Y Y^T X A  +  X V^T
+# Causal masking: zero the strict upper triangle of each T×T Gram matrix.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _lin_FG(X: torch.Tensor, Y: torch.Tensor,
+            A: torch.Tensor, V: torch.Tensor,
+            causal: bool = True) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Compute F(X,Y) and G(X,Y) for the linear-attention Hamiltonian system.
+
+    X, Y : (B, T, d)
+    A, V : (d, d)   — weight matrices (linear maps on token dimension)
+    Returns (F, G) each of shape (B, T, d).
+    """
+    B, T, d = X.shape
+    # Gram matrices  (B, T, T)
+    XA = X @ A.T          # (B,T,d)  — X mapped by A^T
+    GAM_XAX = XA @ X.transpose(-1, -2)   # (B,T,T):  (XA) X^T = X A X^T
+    GAM_YY  = Y  @ Y.transpose(-1, -2)   # (B,T,T):  Y Y^T
+
+    if causal:
+        m = causal_mask(T, X.device)          # (T,T) upper-triangular mask
+        GAM_XAX = GAM_XAX.masked_fill(m.unsqueeze(0), 0.0)
+        GAM_YY  = GAM_YY .masked_fill(m.unsqueeze(0), 0.0)
+
+    inv_T = 1.0 / float(T)
+    F = inv_T * (GAM_XAX @ Y)              # (B,T,d)  : (X A X^T) Y / T
+    G = -inv_T * (GAM_YY @ XA) + X @ V.T  # (B,T,d)  : -(Y Y^T X A)/T + X V^T
+    return F, G
+
+
+class LinearAttentionBaseline(nn.Module):
+    """Plain (gradient-flow / first-order) linear-attention step.
+
+    One layer:  X^{k+1} = X^k + h * F_lin(X^k, -)
+
+    This is just the standard attention update with linear kernel kappa(x,y) = y^T A x,
+    value matrix V, evaluated at the *position* stream only (no momentum).
+    There is no momentum variable — this is the direct linear-attention analogue
+    of the GPT baseline.
+
+    Layer-norm is applied to X before computing QKV (pre-norm convention).
+    """
+
+    def __init__(self, cfg: ModelConfig, h: float = 1.0, causal: bool = True):
+        super().__init__()
+        self.causal = causal
+        # Learned A and V (both d×d)
+        self.c_A = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        self.c_V = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        self.resid_drop = nn.Dropout(cfg.dropout)
+        self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.theta_h = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+
+    def h(self, device=None, dtype=None):
+        hv = F.softplus(self.theta_h)
+        if device is not None or dtype is not None:
+            hv = hv.to(device=device if device is not None else hv.device,
+                       dtype=dtype if dtype is not None else hv.dtype)
+        return hv
+
+    def forward(self, X: torch.Tensor) -> torch.Tensor:
+        B, T, d = X.shape
+        device, dtype = X.device, X.dtype
+        h_t = self.h(device=device, dtype=dtype)
+        Xn = self.ln(X)
+        A = self.c_A.weight   # (d,d)
+        V = self.c_V.weight   # (d,d)
+        XA = Xn @ A.T
+        GAM = XA @ Xn.transpose(-1, -2)  # (B,T,T): X A X^T
+        if self.causal:
+            m = causal_mask(T, X.device)
+            GAM = GAM.masked_fill(m.unsqueeze(0), 0.0)
+        # dx = (1/T) (X A X^T) V X  — standard linear-attention update
+        VX = Xn @ V.T               # (B,T,d)
+        dx = (1.0 / float(T)) * (GAM @ VX)
+        dx = self.resid_drop(dx)
+        return X + h_t * dx
+
+
+class LinearAttentionEuler(nn.Module):
+    """Plain (non-symplectic) Euler for the linear-attention Hamiltonian system.
+
+    Eq. (plain_explicit_Euler) adapted for the linear oracle:
+        X^{k+1} = X^k + h * F_lin(X^k, Y^k)
+        Y^{k+1} = alpha * Y^k + h * G_lin(X^k, Y^k)
+
+    alpha is a learned ConstrainedScalar in (0,1).
+    """
+
+    def __init__(self, cfg: ModelConfig, h: float = 1.0, alpha_init: float = 0.9,
+                 causal: bool = True, presymp_lnp: str = "end"):
+        super().__init__()
+        self.causal = causal
+        self.presymp_lnp = str(presymp_lnp)
+        self.c_A = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        self.c_V = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        self.resid_drop = nn.Dropout(cfg.dropout)
+        self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.ln_p = LayerNorm(cfg.n_embd, bias=cfg.bias) if presymp_lnp != "none" else nn.Identity()
+        # Separate step sizes: hX for position  X^{k+1}=X+hX*F,  hY for momentum  Y^{k+1}=alpha*Y+hY*G
+        self.theta_hX = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.theta_hY = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.theta_h = self.theta_hX   # backward-compat alias
+        self.alpha_plain = ConstrainedScalar(alpha_init, "unit")
+        # diagnostic
+        self.last_h = float(F.softplus(self.theta_hX).detach().item())
+
+    def hX(self, device=None, dtype=None):
+        hv = F.softplus(self.theta_hX)
+        if device is not None or dtype is not None:
+            hv = hv.to(device=device if device is not None else hv.device,
+                       dtype=dtype if dtype is not None else hv.dtype)
+        return hv
+
+    def hY(self, device=None, dtype=None):
+        hv = F.softplus(self.theta_hY)
+        if device is not None or dtype is not None:
+            hv = hv.to(device=device if device is not None else hv.device,
+                       dtype=dtype if dtype is not None else hv.dtype)
+        return hv
+
+    def h(self, device=None, dtype=None):
+        """Backward-compat alias for hX()."""
+        return self.hX(device=device, dtype=dtype)
+
+    def step(self, Xk: torch.Tensor, Yk: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX(device=device, dtype=dtype)
+        hY_t = self.hY(device=device, dtype=dtype)
+        Xn = self.ln(Xk)
+        F_val, G_val = _lin_FG(Xn, Yk, self.c_A.weight, self.c_V.weight, self.causal)
+        F_val = self.resid_drop(F_val)
+        alpha_k = self.alpha_plain()
+        Xk1 = Xk + hX_t * F_val
+        Yk1 = alpha_k * Yk + hY_t * G_val
+        if self.presymp_lnp != "none":
+            Yk1 = self.ln_p(Yk1.float()).to(dtype=Yk1.dtype)
+        self.last_h = hX_t.detach().item()
+        return Xk1, Yk1
+
+
+class LinearAttentionPresymp(nn.Module):
+    """Conformally-symplectic (presymplectic) Euler for the linear-attention system.
+
+    Eq. (presymp_Euler) adapted for the linear oracle:
+        Y^{k+1} = sigma_k * ( Y^k + hY * G_lin(X^k, Y^k) )   [kick then damp]
+        X^{k+1} = X^k + hX * F_lin(X^k, Y^{k+1})
+
+    sigma_k = exp(-delta_eta) is the exact discrete damping factor.
+    hX (position) and hY (momentum) are separately learned; both and the eta
+    schedule coefficients are optimised end-to-end.
+    """
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        h: float = 1.0,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        causal: bool = True,
+        presymp_lnp: str = "end",
+    ):
+        super().__init__()
+        self.causal = causal
+        self.presymp_lnp = str(presymp_lnp)
+        self.c_A = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        self.c_V = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        self.resid_drop = nn.Dropout(cfg.dropout)
+        self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.ln_p = LayerNorm(cfg.n_embd, bias=cfg.bias) if presymp_lnp != "none" else nn.Identity()
+        # Separate step sizes for position and momentum.
+        self.theta_hX = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.theta_hY = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.theta_h = self.theta_hX   # backward-compat alias
+        self.sched = EtaSchedule(
+            t0=t0, mu=eta_mu, log_coef=eta_log_coef, lin_coef=eta_lin_coef,
+            learnable=eta_learnable, mode=eta_mode, init=eta_init,
+            init_log=eta_log_init, init_lin=eta_lin_init, eta_clip=eta_clip,
+        )
+        # diagnostics
+        self.last_h = float(F.softplus(self.theta_hX).detach().item())
+        self.last_xi = 0.0
+
+    def hX(self, device=None, dtype=None):
+        hv = F.softplus(self.theta_hX)
+        if device is not None or dtype is not None:
+            hv = hv.to(device=device if device is not None else hv.device,
+                       dtype=dtype if dtype is not None else hv.dtype)
+        return hv
+
+    def hY(self, device=None, dtype=None):
+        hv = F.softplus(self.theta_hY)
+        if device is not None or dtype is not None:
+            hv = hv.to(device=device if device is not None else hv.device,
+                       dtype=dtype if dtype is not None else hv.dtype)
+        return hv
+
+    def h(self, device=None, dtype=None):
+        """Backward-compat alias for hX()."""
+        return self.hX(device=device, dtype=dtype)
+
+    def step(self, Xk: torch.Tensor, Yk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX(device=device, dtype=dtype)
+        hY_t = self.hY(device=device, dtype=dtype)
+        hX_f = hX_t.detach().item()
+        hY_f = hY_t.detach().item()
+        tk = self.sched.t0 + float(k) * hX_f
+
+        Xn = self.ln(Xk)
+        A = self.c_A.weight
+        V = self.c_V.weight
+        F_val, G_val = _lin_FG(Xn, Yk, A, V, self.causal)
+        F_val = self.resid_drop(F_val)
+
+        # Exact discrete damping over hY interval
+        d_eta = self.sched.delta_eta(tk, hY_f, device, dtype)
+        sigma = torch.exp(-d_eta)
+
+        # Kick-then-damp: Y^{k+1} = sigma * (Y^k + hY * G(X^k, Y^k))
+        Yk1 = sigma * (Yk + hY_t * G_val)
+        # Symplectic position update uses updated momentum Y^{k+1}
+        F_new = self.resid_drop(_lin_FG(Xn, Yk1, A, V, self.causal)[0])
+        Xk1 = Xk + hX_t * F_new
+
+        if self.presymp_lnp != "none":
+            Yk1 = self.ln_p(Yk1.float()).to(dtype=Yk1.dtype)
+        self.last_h = hX_f
+        return Xk1, Yk1
+
+
+class LinearAttentionExpEuler(LinearAttentionPresymp):
+    """Presymplectic exponential Euler for the linear-attention Hamiltonian system.
+
+    Eq. (Presympl_exp_euler) adapted for the linear oracle:
+        Y^{k+1} = sigma_k * Y^k + w_k * G_lin(X^k, Y^k)      [exact damping, old Y]
+        X^{k+1} = X^k + hX * F_lin(X^k, Y^k)                 [position uses *old* Y]
+
+    where sigma_k = exp(-delta_eta(t_k, hY)) and
+    w_k = (1 - sigma_k) / alpha_eff  (= hY when alpha_eff ≈ 0).
+
+    Unlike the presymplectic Euler (kick-then-damp), the position update here
+    uses the *old* momentum Y^k rather than the updated Y^{k+1}.
+    hX and hY are independently learned.
+    """
+
+    def step(self, Xk: torch.Tensor, Yk: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX(device=device, dtype=dtype)
+        hY_t = self.hY(device=device, dtype=dtype)
+        hX_f = hX_t.detach().item()
+        hY_f = hY_t.detach().item()
+        tk = self.sched.t0 + float(k) * hX_f
+
+        Xn = self.ln(Xk)
+        A = self.c_A.weight
+        V = self.c_V.weight
+        F_val, G_val = _lin_FG(Xn, Yk, A, V, self.causal)
+        F_val = self.resid_drop(F_val)
+
+        # Exact discrete damping over hY interval
+        d_eta = self.sched.delta_eta(tk, hY_f, device, dtype)
+        sigma = torch.exp(-d_eta)
+        denom = hY_t.clamp(min=1e-8)
+        alpha_eff = d_eta / denom
+        eps_t = torch.tensor(1e-8, device=device, dtype=dtype)
+        w = torch.where(alpha_eff.abs() > eps_t, (1.0 - sigma) / alpha_eff, hY_t)
+
+        # Exponential Euler: momentum damped exactly, position uses OLD Y
+        Yk1 = sigma * Yk + w * G_val
+        Xk1 = Xk + hX_t * F_val   # F_val was computed with Yk (old momentum)
+
+        if self.presymp_lnp != "none":
+            Yk1 = self.ln_p(Yk1.float()).to(dtype=Yk1.dtype)
+        self.last_h = hX_f
+        return Xk1, Yk1
+
+
+class LinAttnAB2Model(nn.Module):
+    """Adams-Bashforth 2 (AB2) discretization of the linear-attention Hamiltonian system.
+
+    Reuses one oracle per layer (the previous RHS), achieving order-2 accuracy at the
+    same oracle cost as the first-order methods.
+
+    Layer k update (AB2 on the full damped RHS):
+        dX_k = F_lin(X^k, Y^k)
+        dY_k = G_lin(X^k, Y^k) - alpha(t_k) * Y^k
+        X^{k+1} = X^k + hX * (1.5 dX_k - 0.5 dX_{k-1})
+        Y^{k+1} = Y^k + hY * (1.5 dY_k - 0.5 dY_{k-1})
+    with plain Euler (AB1) for k=0.
+
+    hX, hY, and the eta schedule are all learned per layer.
+    """
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        h: float = 1.0,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        presymp_lnp: str = "end",
+        use_v0_init: bool = True,
+        no_mlp: bool = False,
+    ):
         super().__init__()
         self.cfg = cfg
+        self.no_mlp = bool(no_mlp)
+        self.use_v0_init = bool(use_v0_init)
+
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+
+        self.attn = nn.ModuleList([
+            LinearAttentionPresymp(
+                cfg, h=h, t0=t0,
+                eta_mu=eta_mu, eta_log_coef=eta_log_coef, eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init, eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable, eta_mode=eta_mode, eta_init=eta_init,
+                eta_clip=eta_clip, presymp_lnp=presymp_lnp,
+            )
+            for _ in range(cfg.n_layer)
+        ])
+        if not self.no_mlp:
+            self.mlp_steps = nn.ModuleList([PresympMLPSubstep(cfg) for _ in range(cfg.n_layer)])
+
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+
+        # logging stubs
+        self.last_rX_max = 0.0; self.last_rP_max = 0.0
+        self.last_xi_mean = float("nan"); self.last_c_log_mean = float("nan")
+        self.last_c_lin_mean = float("nan")
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, std=0.02)
+            if m.bias is not None: nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.Embedding):
+            nn.init.normal_(m.weight, std=0.02)
+
+    @property
+    def last_h_mean(self):
+        vals = [a.last_h for a in self.attn]
+        return sum(vals) / len(vals) if vals else float("nan")
+
+    def forward(self, idx, targets=None, global_step=None):
+        B, T = idx.shape
+        pos = torch.arange(T, device=idx.device)
+        x = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None])
+        if self.use_v0_init:
+            y = self.drop(self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None])
+        else:
+            y = torch.zeros_like(x)
+        v = torch.zeros_like(x)   # MLP velocity stream
+
+        dX_prev = None; dY_prev = None
+        for k in range(self.cfg.n_layer):
+            a = self.attn[k]
+            hX_k = a.hX(); hY_k = a.hY()
+            hX_f = hX_k.detach().item()
+            tk = a.sched.t0 + float(k) * hX_f
+            device, dtype = x.device, x.dtype
+
+            Xn = a.ln(x)
+            F_k, G_k = _lin_FG(Xn, y, a.c_A.weight, a.c_V.weight, a.causal)
+            F_k = a.resid_drop(F_k)
+            alpha_k = a.sched.alpha(tk, device, dtype)
+            dX_k = F_k
+            dY_k = G_k - alpha_k * y
+
+            if k == 0 or dX_prev is None:
+                dX_eff, dY_eff = dX_k, dY_k
+            else:
+                dX_eff = 1.5 * dX_k - 0.5 * dX_prev
+                dY_eff = 1.5 * dY_k - 0.5 * dY_prev
+
+            x_new = x + hX_k * dX_eff
+            y_new = y + hY_k * dY_eff
+            if a.presymp_lnp != "none":
+                y_new = a.ln_p(y_new.float()).to(dtype=y_new.dtype)
+
+            v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
+            x, y = x_new, y_new
+            dX_prev, dY_prev = dX_k, dY_k
+            a.last_h = hX_f
+
+            if not self.no_mlp:
+                x, v = self.mlp_steps[k](x, v, v_attn=v_attn)
+
+        # Update logged eta-schedule diagnostics
+        c_log_sum = 0.0; c_lin_sum = 0.0; c_cnt = 0
+        for a in self.attn:
+            cl, cm = _get_eta_coefs(a.sched)
+            c_log_sum += cl; c_lin_sum += cm; c_cnt += 1
+        self.last_c_log_mean = (c_log_sum / c_cnt) if c_cnt > 0 else float('nan')
+        self.last_c_lin_mean = (c_lin_sum / c_cnt) if c_cnt > 0 else float('nan')
+
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+class LinAttnETDAB2Model(nn.Module):
+    """ETD-AB2 discretization of the linear-attention Hamiltonian system.
+
+    Uses the integrating-factor (IF) change of variables Pi = exp(eta(t)) * Y to
+    remove the linear damping term, then applies AB2 to the remaining autonomous
+    conservative force H_k = exp(eta(t_k)) * G_lin(X^k, Y^k).
+
+    Layer k update:
+        H_k   = exp(eta(t_k)) * G_lin(X^k, Y^k)
+        H_eff = 1.5 H_k - 0.5 H_{k-1}          (AB2; plain H_k for k=0)
+        Pi_k  = exp(eta(t_k)) * Y^k
+        Pi_{k+1} = Pi_k + hY * H_eff
+        Y^{k+1}  = Pi_{k+1} / exp(eta(t_{k+1}))
+        X^{k+1}  = X^k + hX * F_lin(X^k, Y^{k+1})   [uses updated Y]
+
+    hX, hY and the eta schedule are all learned per layer.
+    """
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        h: float = 1.0,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        presymp_lnp: str = "end",
+        use_v0_init: bool = True,
+        no_mlp: bool = False,
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.no_mlp = bool(no_mlp)
+        self.use_v0_init = bool(use_v0_init)
+
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+
+        self.attn = nn.ModuleList([
+            LinearAttentionPresymp(
+                cfg, h=h, t0=t0,
+                eta_mu=eta_mu, eta_log_coef=eta_log_coef, eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init, eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable, eta_mode=eta_mode, eta_init=eta_init,
+                eta_clip=eta_clip, presymp_lnp=presymp_lnp,
+            )
+            for _ in range(cfg.n_layer)
+        ])
+        if not self.no_mlp:
+            self.mlp_steps = nn.ModuleList([PresympMLPSubstep(cfg) for _ in range(cfg.n_layer)])
+
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+
+        # logging stubs
+        self.last_rX_max = 0.0; self.last_rP_max = 0.0
+        self.last_xi_mean = float("nan"); self.last_c_log_mean = float("nan")
+        self.last_c_lin_mean = float("nan")
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, std=0.02)
+            if m.bias is not None: nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.Embedding):
+            nn.init.normal_(m.weight, std=0.02)
+
+    @property
+    def last_h_mean(self):
+        vals = [a.last_h for a in self.attn]
+        return sum(vals) / len(vals) if vals else float("nan")
+
+    def forward(self, idx, targets=None, global_step=None):
+        B, T = idx.shape
+        pos = torch.arange(T, device=idx.device)
+        x = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None])
+        if self.use_v0_init:
+            y = self.drop(self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None])
+        else:
+            y = torch.zeros_like(x)
+        v = torch.zeros_like(x)   # MLP velocity stream
+
+        H_prev = None
+        for k in range(self.cfg.n_layer):
+            a = self.attn[k]
+            hX_k = a.hX(); hY_k = a.hY()
+            hX_f = hX_k.detach().item()
+            tk = a.sched.t0 + float(k) * hX_f
+            device, dtype = x.device, x.dtype
+
+            Lam_k  = a.sched.exp_eta(tk,           device, dtype)
+            Lam_k1 = a.sched.exp_eta(tk + hX_f,    device, dtype)
+
+            Xn = a.ln(x)
+            A = a.c_A.weight; V_mat = a.c_V.weight
+            _F_old, G_k = _lin_FG(Xn, y, A, V_mat, a.causal)
+
+            H_k = Lam_k * G_k
+            H_eff = H_k if (k == 0 or H_prev is None) else (1.5 * H_k - 0.5 * H_prev)
+
+            Pi_new = Lam_k * y + hY_k * H_eff      # integrating-factor momentum update
+            y_new  = Pi_new / Lam_k1
+
+            # Position update uses updated Y^{k+1} (same as presymp Euler pattern)
+            F_new, _ = _lin_FG(Xn, y_new, A, V_mat, a.causal)
+            F_new = a.resid_drop(F_new)
+            x_new = x + hX_k * F_new
+
+            if a.presymp_lnp != "none":
+                y_new = a.ln_p(y_new.float()).to(dtype=y_new.dtype)
+
+            v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
+            x, y = x_new, y_new
+            H_prev = H_k
+            a.last_h = hX_f
+
+            if not self.no_mlp:
+                x, v = self.mlp_steps[k](x, v, v_attn=v_attn)
+
+        # Update logged eta-schedule diagnostics
+        c_log_sum = 0.0; c_lin_sum = 0.0; c_cnt = 0
+        for a in self.attn:
+            cl, cm = _get_eta_coefs(a.sched)
+            c_log_sum += cl; c_lin_sum += cm; c_cnt += 1
+        self.last_c_log_mean = (c_log_sum / c_cnt) if c_cnt > 0 else float('nan')
+        self.last_c_lin_mean = (c_lin_sum / c_cnt) if c_cnt > 0 else float('nan')
+
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+class GPTModel(nn.Module):
+    def __init__(self, cfg: ModelConfig, no_mlp: bool = False):
+        super().__init__()
+        self.cfg = cfg
+        self.no_mlp = bool(no_mlp)
         self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
         self.drop = nn.Dropout(cfg.dropout)
 
-        self.blocks = nn.ModuleList([GPTBlock(cfg) for _ in range(cfg.n_layer)])
+        self.blocks = nn.ModuleList([GPTBlock(cfg, no_mlp=self.no_mlp) for _ in range(cfg.n_layer)])
         self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
         self.lm_head.weight = self.tok_emb.weight
@@ -1761,6 +2483,7 @@ class PresympModel(nn.Module):
         mlp_use_attn_vel: bool = False,
         mlp_use_p_vel: bool = False,
         no_mlp: bool = False,
+        lookahead: bool = False,
     ):
         super().__init__()
         if mlp_use_attn_vel and mlp_use_p_vel:
@@ -1769,6 +2492,7 @@ class PresympModel(nn.Module):
         self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
         self.mlp_use_p_vel = bool(mlp_use_p_vel)
         self.no_mlp = bool(no_mlp)
+        self.lookahead = bool(lookahead)
         self.use_v0_init = bool(use_v0_init)
         self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
@@ -1803,6 +2527,7 @@ class PresympModel(nn.Module):
             eta_init=eta_init,
             eta_clip=eta_clip,
                 presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
                 # xi_adapt=xi_adapt,
                 r_thresh=r_thresh,
                 r_low=r_low,
@@ -1890,6 +2615,318 @@ class PresympModel(nn.Module):
                 c_log_sum += cl; c_lin_sum += cm; c_cnt += 1
         self.last_c_log_mean = (c_log_sum / c_cnt) if c_cnt > 0 else float('nan')
         self.last_c_lin_mean = (c_lin_sum / c_cnt) if c_cnt > 0 else float('nan')
+
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+class LinAttnModel(nn.Module):
+    """Baseline model with linear self-attention instead of softmax.
+
+    Each layer:  X^{k+1} = LN(X) -> linear_attn(X) -> X + h*dx
+    No momentum; direct analogue of GPTModel.
+    """
+
+    def __init__(self, cfg: ModelConfig, h: float = 1.0, no_mlp: bool = False):
+        super().__init__()
+        self.cfg = cfg
+        self.no_mlp = bool(no_mlp)
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+        self.attn_layers = nn.ModuleList([
+            LinearAttentionBaseline(cfg, h=h) for _ in range(cfg.n_layer)
+        ])
+        if not self.no_mlp:
+            self.mlp_lns = nn.ModuleList([LayerNorm(cfg.n_embd, bias=cfg.bias) for _ in range(cfg.n_layer)])
+            self.mlps    = nn.ModuleList([MLP(cfg) for _ in range(cfg.n_layer)])
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+        # logging stubs
+        self.last_rX_max = 0.0; self.last_rP_max = 0.0
+        self.last_xi_mean = float("nan"); self.last_h_mean = float("nan")
+        self.last_c_log_mean = float("nan"); self.last_c_lin_mean = float("nan")
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, std=0.02)
+            if m.bias is not None: nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.Embedding):
+            nn.init.normal_(m.weight, std=0.02)
+
+    def forward(self, idx, targets=None, global_step=None):
+        B, T = idx.shape
+        pos = torch.arange(T, device=idx.device)
+        x = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None])
+        for k in range(self.cfg.n_layer):
+            x = self.attn_layers[k](x)
+            if not self.no_mlp:
+                x = x + self.mlps[k](self.mlp_lns[k](x))
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+class LinAttnYuriiModel(nn.Module):
+    """YuriiFormer-style model with linear self-attention instead of softmax.
+
+    Each layer uses the Nesterov-Lie-Trotter block structure from YuriiFormerLieTrotterBlock,
+    but the oracle is linear attention: dx = (1/T)(X A X^T)(V X) / T
+    i.e. the standard linear-attention update dx evaluated at the lookahead point x + mu*v.
+    """
+
+    def __init__(self, cfg: ModelConfig, h: float = 1.0, no_mlp: bool = False,
+                 use_v0_init: bool = True):
+        super().__init__()
+        self.cfg = cfg
+        self.no_mlp = bool(no_mlp)
+        self.use_v0_init = bool(use_v0_init)
+        self.tok_emb  = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb  = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+        # Per-layer linear attention + MLP + learned scalars
+        self.attn_layers = nn.ModuleList([LinearAttentionBaseline(cfg, h=h) for _ in range(cfg.n_layer)])
+        self.mlp_lns = nn.ModuleList([LayerNorm(cfg.n_embd, bias=cfg.bias) for _ in range(cfg.n_layer)])
+        self.mlps    = nn.ModuleList([MLP(cfg) for _ in range(cfg.n_layer)])
+        self.ln_v    = nn.ModuleList([LayerNorm(cfg.n_embd, bias=cfg.bias) for _ in range(cfg.n_layer)])
+        # Learned scalars per layer (mu, beta, gamma for attn; mu2, beta2, gamma2 for MLP)
+        self.mu    = nn.ModuleList([ConstrainedScalar(0.9, "unit") for _ in range(cfg.n_layer)])
+        self.beta  = nn.ModuleList([ConstrainedScalar(0.9, "unit") for _ in range(cfg.n_layer)])
+        self.gamma = nn.ModuleList([ConstrainedScalar(1.0, "pos")  for _ in range(cfg.n_layer)])
+        self.mu2    = nn.ModuleList([ConstrainedScalar(0.9, "unit") for _ in range(cfg.n_layer)])
+        self.beta2  = nn.ModuleList([ConstrainedScalar(0.9, "unit") for _ in range(cfg.n_layer)])
+        self.gamma2 = nn.ModuleList([ConstrainedScalar(1.0, "pos")  for _ in range(cfg.n_layer)])
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+        # logging stubs
+        self.last_rX_max = 0.0; self.last_rP_max = 0.0
+        self.last_xi_mean = float("nan"); self.last_h_mean = float("nan")
+        self.last_c_log_mean = float("nan"); self.last_c_lin_mean = float("nan")
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, std=0.02)
+            if m.bias is not None: nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.Embedding):
+            nn.init.normal_(m.weight, std=0.02)
+
+    def forward(self, idx, targets=None, global_step=None):
+        B, T = idx.shape
+        pos = torch.arange(T, device=idx.device)
+        x = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None])
+        if self.use_v0_init:
+            v = self.drop(self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None])
+        else:
+            v = torch.zeros_like(x)
+
+        for k in range(self.cfg.n_layer):
+            mu    = self.mu[k]()
+            beta  = self.beta[k]()
+            gamma = self.gamma[k]()
+            # Attention substep with Nesterov lookahead
+            x_in = x + mu * v
+            # Reuse LinearAttentionBaseline.forward but on the lookahead point
+            attn_lyr = self.attn_layers[k]
+            dx = attn_lyr(x_in) - x_in   # delta from the layer (layer returns x_in + h*dx)
+            v = self.ln_v[k](beta * v + gamma * dx)
+            x = x + v
+
+            if not self.no_mlp:
+                mu2    = self.mu2[k]()
+                beta2  = self.beta2[k]()
+                gamma2 = self.gamma2[k]()
+                x_in2 = x + mu2 * v
+                dx2 = self.mlps[k](self.mlp_lns[k](x_in2))
+                v = self.ln_v[k](beta2 * v + gamma2 * dx2)
+                x = x + v
+
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+class LinAttnEulerModel(nn.Module):
+    """Plain (non-symplectic) Euler model with linear attention Hamiltonian system."""
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        h: float = 1.0,
+        alpha_init: float = 0.9,
+        presymp_lnp: str = "end",
+        use_v0_init: bool = True,
+        no_mlp: bool = False,
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.no_mlp = bool(no_mlp)
+        self.use_v0_init = bool(use_v0_init)
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+        self.attn = nn.ModuleList([
+            LinearAttentionEuler(cfg, h=h, alpha_init=alpha_init, presymp_lnp=presymp_lnp)
+            for _ in range(cfg.n_layer)
+        ])
+        if not self.no_mlp:
+            self.mlp_steps = nn.ModuleList([
+                PresympMLPSubstep(cfg) for _ in range(cfg.n_layer)
+            ])
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+        # logging stubs
+        self.last_rX_max = 0.0; self.last_rP_max = 0.0
+        self.last_xi_mean = float("nan"); self.last_c_log_mean = float("nan"); self.last_c_lin_mean = float("nan")
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, std=0.02)
+            if m.bias is not None: nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.Embedding):
+            nn.init.normal_(m.weight, std=0.02)
+
+    @property
+    def last_h_mean(self):
+        vals = [a.last_h for a in self.attn]
+        return sum(vals) / len(vals) if vals else float("nan")
+
+    def forward(self, idx, targets=None, global_step=None):
+        B, T = idx.shape
+        pos = torch.arange(T, device=idx.device)
+        x = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None])
+        if self.use_v0_init:
+            y = self.drop(self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None])
+        else:
+            y = torch.zeros_like(x)
+        v = torch.zeros_like(x)
+
+        for k in range(self.cfg.n_layer):
+            x_new, y_new = self.attn[k].step(x, y)
+            if not self.no_mlp:
+                v_attn = (x_new - x) / self.attn[k].h().clamp(min=1e-8)
+                x_new, v = self.mlp_steps[k](x_new, v, v_attn=v_attn)
+            x, y = x_new, y_new
+
+        x = self.ln_f(x)
+        logits = self.lm_head(x)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+class LinAttnPresympModel(nn.Module):
+    """Conformally-symplectic (presymplectic) Euler model with linear attention.
+
+    attn_cls controls the layer integrator:
+        "presymp"   (default) — kick-then-damp Euler, position uses updated Y^{k+1}
+        "exp_euler"           — exponential Euler, position uses old Y^k
+    """
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        h: float = 1.0,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        presymp_lnp: str = "end",
+        use_v0_init: bool = True,
+        no_mlp: bool = False,
+        attn_cls: str = "presymp",
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.no_mlp = bool(no_mlp)
+        self.use_v0_init = bool(use_v0_init)
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+
+        _attn_cls_map = {"presymp": LinearAttentionPresymp, "exp_euler": LinearAttentionExpEuler}
+        if attn_cls not in _attn_cls_map:
+            raise ValueError(f"attn_cls must be one of {list(_attn_cls_map)}, got {attn_cls!r}")
+        _AttnCls = _attn_cls_map[attn_cls]
+
+        self.attn = nn.ModuleList([
+            _AttnCls(
+                cfg, h=h, t0=t0,
+                eta_mu=eta_mu, eta_log_coef=eta_log_coef, eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init, eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable, eta_mode=eta_mode, eta_init=eta_init,
+                eta_clip=eta_clip, presymp_lnp=presymp_lnp,
+            )
+            for _ in range(cfg.n_layer)
+        ])
+        if not self.no_mlp:
+            self.mlp_steps = nn.ModuleList([
+                PresympMLPSubstep(cfg) for _ in range(cfg.n_layer)
+            ])
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+        # logging stubs
+        self.last_rX_max = 0.0; self.last_rP_max = 0.0
+        self.last_xi_mean = float("nan"); self.last_c_log_mean = float("nan"); self.last_c_lin_mean = float("nan")
+        self.apply(self._init_weights)
+
+    def _init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, std=0.02)
+            if m.bias is not None: nn.init.zeros_(m.bias)
+        elif isinstance(m, nn.Embedding):
+            nn.init.normal_(m.weight, std=0.02)
+
+    @property
+    def last_h_mean(self):
+        vals = [a.last_h for a in self.attn]
+        return sum(vals) / len(vals) if vals else float("nan")
+
+    def forward(self, idx, targets=None, global_step=None):
+        B, T = idx.shape
+        pos = torch.arange(T, device=idx.device)
+        x = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None])
+        if self.use_v0_init:
+            y = self.drop(self.tok_v0_emb(idx) + self.pos_v0_emb(pos)[None])
+        else:
+            y = torch.zeros_like(x)
+        v = torch.zeros_like(x)
+
+        for k in range(self.cfg.n_layer):
+            x_new, y_new = self.attn[k].step(x, y, k)
+            if not self.no_mlp:
+                v_attn = (x_new - x) / self.attn[k].h().clamp(min=1e-8)
+                x_new, v = self.mlp_steps[k](x_new, v, v_attn=v_attn)
+            x, y = x_new, y_new
 
         x = self.ln_f(x)
         logits = self.lm_head(x)
