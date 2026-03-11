@@ -298,9 +298,17 @@ def main():
         run_dir = os.path.join(args.out_dir, f"{args.arch}_{args.run_name}")
     os.makedirs(run_dir, exist_ok=True)
 
-    # Seeds
+    # Seeds — set CPU, all CUDA devices, and cuDNN determinism together.
+    # Without these three lines, cuBLAS selects different matmul algorithms on
+    # different GPU generations, causing bfloat16 rounding to differ by ~1 ULP.
+    # That tiny difference is amplified ~100x through the scalar-LR-boosted
+    # c_log/c_lin/theta_hX parameters and bifurcates the h trajectory within
+    # the first 200 steps.
     torch.manual_seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
     np.random.seed(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     device = args.device
     if device.startswith("cuda") and not torch.cuda.is_available():
