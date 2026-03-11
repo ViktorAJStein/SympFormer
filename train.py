@@ -694,7 +694,7 @@ def main():
     # tokens_cum: cumulative tokens processed since step 0
     ensure_csv_header(
         metrics_path,
-        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "xi_mean", "rX", "rP", "c_log_mean", "c_lin_mean"],
+        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "hY_mean", "xi_mean", "rX", "rP", "c_log_mean", "c_lin_mean"],
     )
     plot_path = os.path.join(run_dir, "loss.png")
 
@@ -744,7 +744,7 @@ def main():
             if args.arch == "yurii_lt" and args.yurii_restart != "none":
                 extra = f" | restarts {restarts_accum}"
             if (args.arch.startswith("presymp") or args.arch in ("plain_euler", "lin_presymp", "lin_exp_euler", "lin_ab2", "lin_etd_ab2")) and hasattr(model, "last_xi_mean"):
-                extra += f" | h_mean {getattr(model, 'last_h_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e} | c_log {getattr(model, 'last_c_log_mean', float('nan')):.4g} | c_lin {getattr(model, 'last_c_lin_mean', float('nan')):.4g}"
+                extra += f" | hX {getattr(model, 'last_h_mean', float('nan')):.4g} | hY {getattr(model, 'last_hY_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e} | c_log {getattr(model, 'last_c_log_mean', float('nan')):.4g} | c_lin {getattr(model, 'last_c_lin_mean', float('nan')):.4g}"
             print(
                 f"[{args.arch}] step {step:6d} | loss {loss_accum:.4f} | lr {lr:.2e} | "
                 f"toks/step {toks_per_step} | wall_dt {dt:.2f}s | wall {wall_cum:.1f}s{extra}"
@@ -761,6 +761,7 @@ def main():
                     str(toks_per_step),
                     str(toks_cum),
                     f"{getattr(model, 'last_h_mean', '')}",
+                    f"{getattr(model, 'last_hY_mean', '')}",
                     f"{getattr(model, 'last_xi_mean', '')}",
                     f"{getattr(model, 'last_rX_max', '')}",
                     f"{getattr(model, 'last_rP_max', '')}",
@@ -784,6 +785,7 @@ def main():
                     str(toks_per_step),
                     str(toks_cum),
                     f"{getattr(model, 'last_h_mean', '')}",
+                    f"{getattr(model, 'last_hY_mean', '')}",
                     f"{getattr(model, 'last_xi_mean', '')}",
                     f"{getattr(model, 'last_rX_max', '')}",
                     f"{getattr(model, 'last_rP_max', '')}",

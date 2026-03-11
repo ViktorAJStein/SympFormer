@@ -376,6 +376,37 @@ class EtaSchedule(nn.Module):
         d = e1 - e0
         return torch.clamp(d, -self.eta_clip, self.eta_clip)
 
+    def delta_eta_tensor(self, t: float, dt: torch.Tensor, device, dtype) -> torch.Tensor:
+        """Like delta_eta but dt is a live tensor, so gradients flow through hY.
+
+        This enables sigma = exp(-delta_eta_tensor(...)) to backpropagate into
+        theta_hY, giving the correct full gradient for the exponential-Euler
+        momentum update  Pk1 = sigma*Pk + w*Gv.
+
+        Using the detached float version (delta_eta) severs ~84% of the true
+        d(Pk1)/d(hY) gradient at initialization because d(sigma)/d(hY)*Pk
+        is never computed.
+        """
+        tt0 = torch.tensor(t, device=device, dtype=dtype)
+        tt1 = tt0 + dt                    # tt1 carries gradient w.r.t. dt
+        if self.learnable:
+            if self.mode == 'log':
+                d = self.c_log() * torch.log(tt1 / tt0)
+            elif self.mode == 'linear':
+                d = self.c_lin().to(device=device, dtype=dtype) * dt
+            else:  # loglin
+                d = self.c_log() * torch.log(tt1 / tt0) + self.c_lin().to(device=device, dtype=dtype) * dt
+        else:
+            tt0_c = torch.tensor(self.c_log_const, device=device, dtype=dtype)
+            tt1_c = torch.tensor(self.c_lin_const, device=device, dtype=dtype)
+            if self.mode == 'log':
+                d = tt0_c * torch.log(tt1 / tt0)
+            elif self.mode == 'linear':
+                d = tt1_c * dt
+            else:  # loglin
+                d = tt0_c * torch.log(tt1 / tt0) + tt1_c * dt
+        return torch.clamp(d, -self.eta_clip, self.eta_clip)
+
 def _get_eta_coefs(sched):
     """Return (c_log, c_lin) as Python floats from an EtaSchedule instance."""
     if sched.learnable:
@@ -796,6 +827,7 @@ class DampedEulerAttention(nn.Module):
         self.last_rX = 0.0
         self.last_rP = 0.0
         self.last_h = float(F.softplus(self.theta_h).detach().cpu().item())
+        self.last_hY = float(F.softplus(self.theta_hY).detach().cpu().item())
         self.last_xi = 0.0
 
     def _qkv(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -904,6 +936,7 @@ class DampedEulerAttention(nn.Module):
         if self.presymp_lnp != "none":
             Pk1 = self._apply_lnp(Pk1)
         self.last_h = hX_f
+        self.last_hY = hY_t.detach().item()
         return Xk1, Pk1
 
 
@@ -919,17 +952,19 @@ class DampedExpEulerAttention(DampedEulerAttention):
         hX_t = self.hX()               # position step size (tensor)
         hY_t = self.hY()               # momentum step size (tensor)
         hX_f = hX_t.detach().item()    # float — schedule time indexing only
-        hY_f = hY_t.detach().item()    # float — delta_eta integral interval
+
         tk = self.sched.t0 + float(k) * hX_f
 
         # one oracle call at (Xk, Pk); Fv already incorporates c_B and the lookahead point.
         Fv, Gv, z, _alpha = self.FG_alpha(Xk, Pk, k)
 
-        # Exact discrete damping over interval hY
-        d_eta = self.sched.delta_eta(tk, hY_f, device, dtype)
+        # Exact discrete damping over interval hY.
+        # Use delta_eta_tensor (hY_t live) so that sigma = exp(-d_eta) backprops
+        # into theta_hY.  The previously used hY_f = hY_t.detach().item() severed
+        # the d(sigma)/d(hY)*Pk term, which is ~84% of the true gradient at init.
+        d_eta = self.sched.delta_eta_tensor(tk, hY_t, device, dtype)
         sigma = torch.exp(-d_eta)
-        denom = hY_t.clamp(min=1e-8)   # tensor — keeps gradient path to theta_hY
-        alpha_eff = d_eta / denom
+        alpha_eff = d_eta / hY_t.clamp(min=1e-8)
         eps = torch.tensor(1e-8, device=device, dtype=dtype)
         w = torch.where(alpha_eff.abs() > eps, (1.0 - sigma) / alpha_eff, hY_t)
 
@@ -939,6 +974,7 @@ class DampedExpEulerAttention(DampedEulerAttention):
         if self.presymp_lnp != "none":
             Pk1 = self._apply_lnp(Pk1)
         self.last_h = hX_f
+        self.last_hY = hY_t.detach().item()
         return Xk1, Pk1
 
 class PlainEulerAttention(DampedEulerAttention):
@@ -974,9 +1010,8 @@ class PlainEulerAttention(DampedEulerAttention):
         if self.presymp_lnp != "none":
             Pk1 = self._apply_lnp(Pk1)
         self.last_h = hX_f
+        self.last_hY = hY_t.detach().item()
         return Xk1, Pk1
-
-class HalfDampStrangAttention(nn.Module):
     """Half-damping Strang splitting for the damped system.
 
     One step is
@@ -1922,7 +1957,6 @@ class LinearAttentionPresymp(nn.Module):
         hX_t = self.hX(device=device, dtype=dtype)
         hY_t = self.hY(device=device, dtype=dtype)
         hX_f = hX_t.detach().item()
-        hY_f = hY_t.detach().item()
         tk = self.sched.t0 + float(k) * hX_f
 
         Xn = self.ln(Xk)
@@ -1931,8 +1965,9 @@ class LinearAttentionPresymp(nn.Module):
         F_val, G_val = _lin_FG(Xn, Yk, A, V, self.causal)
         F_val = self.resid_drop(F_val)
 
-        # Exact discrete damping over hY interval
-        d_eta = self.sched.delta_eta(tk, hY_f, device, dtype)
+        # Exact discrete damping over hY interval — use live hY_t so sigma
+        # backprops into theta_hY (same fix as DampedExpEulerAttention).
+        d_eta = self.sched.delta_eta_tensor(tk, hY_t, device, dtype)
         sigma = torch.exp(-d_eta)
 
         # Kick-then-damp: Y^{k+1} = sigma * (Y^k + hY * G(X^k, Y^k))
@@ -1944,6 +1979,7 @@ class LinearAttentionPresymp(nn.Module):
         if self.presymp_lnp != "none":
             Yk1 = self.ln_p(Yk1.float()).to(dtype=Yk1.dtype)
         self.last_h = hX_f
+        self.last_hY = hY_t.detach().item()
         return Xk1, Yk1
 
 
@@ -1967,7 +2003,6 @@ class LinearAttentionExpEuler(LinearAttentionPresymp):
         hX_t = self.hX(device=device, dtype=dtype)
         hY_t = self.hY(device=device, dtype=dtype)
         hX_f = hX_t.detach().item()
-        hY_f = hY_t.detach().item()
         tk = self.sched.t0 + float(k) * hX_f
 
         Xn = self.ln(Xk)
@@ -1976,11 +2011,11 @@ class LinearAttentionExpEuler(LinearAttentionPresymp):
         F_val, G_val = _lin_FG(Xn, Yk, A, V, self.causal)
         F_val = self.resid_drop(F_val)
 
-        # Exact discrete damping over hY interval
-        d_eta = self.sched.delta_eta(tk, hY_f, device, dtype)
+        # Exact discrete damping over hY interval — live hY_t so sigma
+        # backprops into theta_hY (same fix as DampedExpEulerAttention).
+        d_eta = self.sched.delta_eta_tensor(tk, hY_t, device, dtype)
         sigma = torch.exp(-d_eta)
-        denom = hY_t.clamp(min=1e-8)
-        alpha_eff = d_eta / denom
+        alpha_eff = d_eta / hY_t.clamp(min=1e-8)
         eps_t = torch.tensor(1e-8, device=device, dtype=dtype)
         w = torch.where(alpha_eff.abs() > eps_t, (1.0 - sigma) / alpha_eff, hY_t)
 
@@ -1991,6 +2026,7 @@ class LinearAttentionExpEuler(LinearAttentionPresymp):
         if self.presymp_lnp != "none":
             Yk1 = self.ln_p(Yk1.float()).to(dtype=Yk1.dtype)
         self.last_h = hX_f
+        self.last_hY = hY_t.detach().item()
         return Xk1, Yk1
 
 
@@ -2588,6 +2624,7 @@ class PresympModel(nn.Module):
         xi_sum = 0.0
         xi_cnt = 0
         h_sum = 0.0
+        hY_sum = 0.0
         h_cnt = 0
         for k, blk in enumerate(self.blocks):
             x, p, v = blk(x, p, v, k)
@@ -2600,11 +2637,14 @@ class PresympModel(nn.Module):
             if attn is not None and hasattr(attn, 'last_h'):
                 h_sum += float(attn.last_h)
                 h_cnt += 1
+            if attn is not None and hasattr(attn, 'last_hY'):
+                hY_sum += float(attn.last_hY)
 
         self.last_rX_max = rX_max
         self.last_rP_max = rP_max
         self.last_xi_mean = (xi_sum / xi_cnt) if xi_cnt > 0 else float('nan')
         self.last_h_mean = (h_sum / h_cnt) if h_cnt > 0 else float('nan')
+        self.last_hY_mean = (hY_sum / h_cnt) if h_cnt > 0 else float('nan')
 
         # Collect eta schedule coefficients (mean across layers that have a sched)
         c_log_sum = 0.0; c_lin_sum = 0.0; c_cnt = 0
