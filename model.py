@@ -818,6 +818,8 @@ class DampedEulerAttention(nn.Module):
         self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
         self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
         # c_B: freely learned F oracle (identity init). _get_B() used only by HalfDampStrang.
+        self.c_B = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        nn.init.eye_(self.c_B.weight)
         self.mu_la = ConstrainedScalar(0.001, "unit")
         self.attn_drop = nn.Dropout(cfg.dropout)
         self.resid_drop = nn.Dropout(cfg.dropout)
