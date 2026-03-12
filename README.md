@@ -1,4 +1,4 @@
-# SymplectFormer
+# SympFormer
 
 Requirements
 * PyTorch
