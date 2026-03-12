@@ -817,8 +817,7 @@ class DampedEulerAttention(nn.Module):
 
         self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
         self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
-        self.c_B = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
-        nn.init.eye_(self.c_B.weight)
+        # B is derived from Q,K,V weights via _get_B(); no separate c_B parameter.
         self.mu_la = ConstrainedScalar(0.001, "unit")
         self.attn_drop = nn.Dropout(cfg.dropout)
         self.resid_drop = nn.Dropout(cfg.dropout)
@@ -888,32 +887,69 @@ class DampedEulerAttention(nn.Module):
             return X
         return X + self.mu_la() * P
 
-    def _F_E_z_vmerge(self, X: torch.Tensor, P: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        # Returns (F, E, z, v_merge). When lookahead=True, QKV and hence
-        # z and G are evaluated at X + mu_la*P instead of X.
+    def _get_B(self) -> torch.Tensor:
+        """Compute B = Sym(W_V A_eff^{-1}) as per paper Algorithm 2 (F oracle).
+
+        A_eff = (scale/n_head) * W_Q^T W_K + eps*I
+        B_sym = (W_V A_eff^{-1} + A_eff^{-T} W_V^T) / 2
+
+        The symmetrisation ensures that F_i = B_sym P_i / z_i is the gradient of
+        a scalar Hamiltonian w.r.t. X.  W_out is NOT included here — it enters only
+        the G oracle via c_proj(v_merge aggregation), matching the tex exactly.
+        """
+        d = self.cfg.n_embd
+        device_type = self.c_attn.weight.device.type
+        with torch.autocast(device_type=device_type, enabled=False):
+            W_Q = self.c_attn.weight[:d,    :].float()
+            W_K = self.c_attn.weight[d:2*d, :].float()
+            W_V = self.c_attn.weight[2*d:,  :].float()
+            A_eff = ((self.scale / self.n_head) * (W_Q.T @ W_K)).float()
+            A_reg = A_eff + 1e-6 * torch.eye(d, device=A_eff.device, dtype=torch.float32)
+            # B_raw = W_V A_eff^{-1}: solve A_reg.T B_raw.T = W_V.T
+            B_raw = torch.linalg.solve(A_reg.T, W_V.T).T
+            # Symmetrize: B_sym = (B_raw + B_raw.T) / 2
+            return (B_raw + B_raw.T) / 2
+
+    def _F_E_z_vmerge(self, X: torch.Tensor, P: torch.Tensor, B: torch.Tensor
+                     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Returns (F, E, z, v_merge) for one combined kernel evaluation.
+
+        F_i = B_sym P_i / z_i   (B_sym = Sym(W_V A_eff^{-1}), symmetric so no transpose needed)
+        v_merge is the reshaped V tensor passed to _G_from_cache.
+        """
         x_ln = self.ln(self._la_input(X, P))
         q, k, v = self._qkv(x_ln)
         E, z = self._kernel_E_z(q, k)
-        B, T, C = X.shape
-        v_merge = v.transpose(1, 2).contiguous().view(B, T, C)
-        Fv = self.c_B(P) / z.unsqueeze(-1)
+        B_t = B.to(dtype=P.dtype)
+        Fv = (P @ B_t) / z.unsqueeze(-1)   # B_sym symmetric → no .T needed
+        Bb, T, C = X.shape
+        v_merge = v.transpose(1, 2).contiguous().view(Bb, T, C)
         return Fv, E, z, v_merge
 
-    def _G_from_cache(self, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor, v_merge: torch.Tensor) -> torch.Tensor:
-        # Conservative force term G (without damping), using cached (E,z,v_merge).
-        a = (P * P).sum(dim=-1)
-        s = a / (z * z + self.eps)
-        M = E * (s.unsqueeze(-1) + s.unsqueeze(-2) - 2.0)
+    def _G_from_cache(self, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor,
+                      v_merge: torch.Tensor) -> torch.Tensor:
+        """Conservative force G = -∇_X H_a per tex Algorithm 2.
+
+        s_i = ||P_i||^2 / (z_i^2 + eps)
+        M_{i,j} = E_{i,j} * (s_i + s_j - 2)     [−2 sign from Hamiltonian derivation]
+        G = (M @ v_merge / (2T)) @ W_O^T          [aggregated through c_proj]
+
+        This is identical to the winning HalfDampStrangAttention._forH oracle.
+        The earlier +2 / B-norm / AX_T variant implemented a different Hamiltonian.
+        """
+        a = (P * P).sum(dim=-1)                                     # (B, T)
+        s = a / (z * z + self.eps)                                  # (B, T)
+        M = E * (s.unsqueeze(-1) + s.unsqueeze(-2) - 2.0)          # (B, T, T)
         core = torch.matmul(M, v_merge) / (2.0 * float(P.shape[1]))
-        core = self.resid_drop(self.c_proj(core))
-        return core
+        return self.resid_drop(self.c_proj(core))
 
     def FG_alpha(self, X: torch.Tensor, P: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # Return (F, G, z, alpha) at (X,P) for layer index k.
         device, dtype = X.device, X.dtype
         h = self.h().item()
         tk = self.sched.t0 + float(k) * h
-        Fv, E, z, v_merge = self._F_E_z_vmerge(X, P)
+        B = self._get_B().to(device=device)
+        Fv, E, z, v_merge = self._F_E_z_vmerge(X, P, B)
         Gv = self._G_from_cache(P, E=E, z=z, v_merge=v_merge)
         alpha = self.sched.alpha(tk, device, dtype)
         return Fv, Gv, z, alpha
@@ -955,7 +991,7 @@ class DampedExpEulerAttention(DampedEulerAttention):
 
         tk = self.sched.t0 + float(k) * hX_f
 
-        # one oracle call at (Xk, Pk); Fv already incorporates c_B and the lookahead point.
+        # one oracle call at (Xk, Pk); Fv incorporates B (derived from Q,K,V) and lookahead.
         Fv, Gv, z, _alpha = self.FG_alpha(Xk, Pk, k)
 
         # Exact discrete damping over interval hY.
@@ -1012,6 +1048,9 @@ class PlainEulerAttention(DampedEulerAttention):
         self.last_h = hX_f
         self.last_hY = hY_t.detach().item()
         return Xk1, Pk1
+
+
+class HalfDampStrangAttention(nn.Module):
     """Half-damping Strang splitting for the damped system.
 
     One step is
@@ -1701,7 +1740,7 @@ class PresympModelETDAB2(PresympModelAB2):
             Pi_new = Pi + hY_k * H_eff         # momentum update uses hY
             p_new = Pi_new / Lam_k1
 
-            x_new = x + hX_k * (self.attn[k].c_B(p_new) / z.unsqueeze(-1))  # position uses hX
+            x_new = x + hX_k * (p_new @ self.attn[k]._get_B().to(device=x.device, dtype=x.dtype).T / z.unsqueeze(-1))  # position uses hX
             if self.attn[k].presymp_lnp != "none":
                 p_new = self.attn[k]._apply_lnp(p_new)
 
