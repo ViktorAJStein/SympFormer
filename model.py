@@ -817,7 +817,7 @@ class DampedEulerAttention(nn.Module):
 
         self.c_attn = nn.Linear(cfg.n_embd, 3 * cfg.n_embd, bias=cfg.bias)
         self.c_proj = nn.Linear(cfg.n_embd, cfg.n_embd, bias=cfg.bias)
-        # B is derived from Q,K,V weights via _get_B(); no separate c_B parameter.
+        # c_B: freely learned F oracle (identity init). _get_B() used only by HalfDampStrang.
         self.mu_la = ConstrainedScalar(0.001, "unit")
         self.attn_drop = nn.Dropout(cfg.dropout)
         self.resid_drop = nn.Dropout(cfg.dropout)
@@ -910,47 +910,53 @@ class DampedEulerAttention(nn.Module):
             # Symmetrize: B_sym = (B_raw + B_raw.T) / 2
             return (B_raw + B_raw.T) / 2
 
-    def _F_E_z_vmerge(self, X: torch.Tensor, P: torch.Tensor, B: torch.Tensor
-                     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Returns (F, E, z, v_merge) for one combined kernel evaluation.
+    def _F_E_z_xln(self, X: torch.Tensor, P: torch.Tensor
+                   ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Returns (F, E, z, x_ln). x_ln is cached for _G_from_cache.
 
-        F_i = B_sym P_i / z_i   (B_sym = Sym(W_V A_eff^{-1}), symmetric so no transpose needed)
-        v_merge is the reshaped V tensor passed to _G_from_cache.
+        F_i = c_B(P_i) / z_i  (c_B initialized as identity, freely learned)
         """
         x_ln = self.ln(self._la_input(X, P))
-        q, k, v = self._qkv(x_ln)
+        q, k, _ = self._qkv(x_ln)
         E, z = self._kernel_E_z(q, k)
-        B_t = B.to(dtype=P.dtype)
-        Fv = (P @ B_t) / z.unsqueeze(-1)   # B_sym symmetric → no .T needed
-        Bb, T, C = X.shape
-        v_merge = v.transpose(1, 2).contiguous().view(Bb, T, C)
-        return Fv, E, z, v_merge
+        Fv = self.c_B(P) / z.unsqueeze(-1)
+        return Fv, E, z, x_ln
 
     def _G_from_cache(self, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor,
-                      v_merge: torch.Tensor) -> torch.Tensor:
-        """Conservative force G = -∇_X H_a per tex Algorithm 2.
+                      x_ln: torch.Tensor) -> torch.Tensor:
+        """Conservative force G = -∂H/∂x_ln, exact gradient of
 
-        s_i = ||P_i||^2 / (z_i^2 + eps)
-        M_{i,j} = E_{i,j} * (s_i + s_j - 2)     [−2 sign from Hamiltonian derivation]
-        G = (M @ v_merge / (2T)) @ W_O^T          [aggregated through c_proj]
+            H = (1/2) Σ_i (c_B(P_i)·P_i) / z_i(x_ln)
 
-        This is identical to the winning HalfDampStrangAttention._forH oracle.
-        The earlier +2 / B-norm / AX_T variant implemented a different Hamiltonian.
+        with z_i = (1/T) Σ_j exp(<Q_i, K_j>/√d_h).  Differentiating through z_i
+        w.r.t. x_ln gives:
+
+            G_i = (scale / (2 T n_head)) *
+                  [ (s * (E @ x_ln)) @ (W_K^T W_Q)
+                  + (E^T @ (s * x_ln)) @ (W_Q^T W_K) ]
+
+        where s_i = a_i / z_i², a_i = (c_B(P_i) · P_i).
+        This is identical to the oracle in the 00:51 snapshot that produced new_G.
         """
-        a = (P * P).sum(dim=-1)                                     # (B, T)
-        s = a / (z * z + self.eps)                                  # (B, T)
-        M = E * (s.unsqueeze(-1) + s.unsqueeze(-2) - 2.0)          # (B, T, T)
-        core = torch.matmul(M, v_merge) / (2.0 * float(P.shape[1]))
-        return self.resid_drop(self.c_proj(core))
+        d = P.shape[-1]
+        T_f = float(x_ln.shape[1])
+        W_Q = self.c_attn.weight[:d, :]
+        W_K = self.c_attn.weight[d:2*d, :]
+        a   = (self.c_B(P) * P).sum(dim=-1)             # (B, T)
+        s   = a / (z * z + self.eps)                     # (B, T)
+        factor = self.scale / (2.0 * T_f * self.n_head)
+        sEx  = s.unsqueeze(-1) * (E @ x_ln)             # (B, T, d)
+        ETsx = E.transpose(-1, -2) @ (s.unsqueeze(-1) * x_ln)   # (B, T, d)
+        G = factor * (sEx @ (W_K.T @ W_Q) + ETsx @ (W_Q.T @ W_K))
+        return self.resid_drop(G)
 
     def FG_alpha(self, X: torch.Tensor, P: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # Return (F, G, z, alpha) at (X,P) for layer index k.
         device, dtype = X.device, X.dtype
         h = self.h().item()
         tk = self.sched.t0 + float(k) * h
-        B = self._get_B().to(device=device)
-        Fv, E, z, v_merge = self._F_E_z_vmerge(X, P, B)
-        Gv = self._G_from_cache(P, E=E, z=z, v_merge=v_merge)
+        Fv, E, z, x_ln = self._F_E_z_xln(X, P)
+        Gv = self._G_from_cache(P, E=E, z=z, x_ln=x_ln)
         alpha = self.sched.alpha(tk, device, dtype)
         return Fv, Gv, z, alpha
 
@@ -1740,7 +1746,7 @@ class PresympModelETDAB2(PresympModelAB2):
             Pi_new = Pi + hY_k * H_eff         # momentum update uses hY
             p_new = Pi_new / Lam_k1
 
-            x_new = x + hX_k * (p_new @ self.attn[k]._get_B().to(device=x.device, dtype=x.dtype).T / z.unsqueeze(-1))  # position uses hX
+            x_new = x + hX_k * (self.attn[k].c_B(p_new) / z.unsqueeze(-1))  # position uses hX, c_B oracle
             if self.attn[k].presymp_lnp != "none":
                 p_new = self.attn[k]._apply_lnp(p_new)
 
