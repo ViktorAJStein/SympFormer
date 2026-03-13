@@ -1,5 +1,6 @@
 ### 10.03.26 00:05
 import math
+import warnings
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -41,6 +42,28 @@ class ModelConfig:
 def causal_mask(T: int, device: torch.device) -> torch.Tensor:
     # True where j > i (masked)
     return torch.triu(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=1)
+
+
+def _warn_once(module: nn.Module, key: str, message: str) -> None:
+    cache = getattr(module, '_leak_warning_keys', None)
+    if cache is None:
+        cache = set()
+        setattr(module, '_leak_warning_keys', cache)
+    if key not in cache:
+        warnings.warn(message, RuntimeWarning, stacklevel=3)
+        cache.add(key)
+        setattr(module, '_leak_warning_count', int(getattr(module, '_leak_warning_count', 0)) + 1)
+
+
+def _future_mass(E: torch.Tensor) -> float:
+    if E.ndim != 3:
+        return 0.0
+    T = E.shape[-1]
+    m = torch.triu(torch.ones(T, T, dtype=torch.bool, device=E.device), diagonal=1)
+    if not bool(m.any()):
+        return 0.0
+    return float(E.masked_select(m.unsqueeze(0)).abs().max().detach().cpu().item())
+
 
 
 class LayerNorm(nn.Module):
@@ -1344,7 +1367,7 @@ class PresympGPTBlock(nn.Module):
         self.lookahead = bool(lookahead)
         attn_scheme = str(attn_scheme)
         if attn_scheme == "presymp":
-            self.attn = PresymplecticSoftmaxAttention(
+            self.attn = TheoryPresymplecticSoftmaxAttention(
                 cfg,
                 h=h,
                 xi=xi,
@@ -1372,7 +1395,7 @@ class PresympGPTBlock(nn.Module):
                 lookahead=lookahead,
             )
         elif attn_scheme == "euler":
-            self.attn = DampedEulerAttention(
+            self.attn = TheoryDampedEulerAttention(
                 cfg,
                 h=h,
                 t0=t0,
@@ -1389,7 +1412,7 @@ class PresympGPTBlock(nn.Module):
                 lookahead=lookahead,
             )
         elif attn_scheme == "exp_euler":
-            self.attn = DampedExpEulerAttention(
+            self.attn = TheoryDampedExpEulerAttention(
                 cfg,
                 h=h,
                 t0=t0,
@@ -1406,7 +1429,7 @@ class PresympGPTBlock(nn.Module):
                 lookahead=lookahead,
             )
         elif attn_scheme == "strang":
-            self.attn = HalfDampStrangAttention(
+            self.attn = TheoryHalfDampStrangAttention(
                 cfg,
                 h=h,
                 xi=xi,
@@ -1425,7 +1448,7 @@ class PresympGPTBlock(nn.Module):
                 lookahead=lookahead,
             )
         elif attn_scheme == "plain_euler":
-            self.attn = PlainEulerAttention(
+            self.attn = TheoryPlainEulerAttention(
                 cfg,
                 h=h,
                 t0=t0,
@@ -1453,6 +1476,7 @@ class PresympGPTBlock(nn.Module):
         self.mu_mlp = ConstrainedScalar(0.9, "unit")
         self.beta_mlp = ConstrainedScalar(0.9, "unit")
         self.gamma_mlp = ConstrainedScalar(1.0, "pos")
+        self._token_conditioned_init = False
 
     def forward(
         self,
@@ -1491,18 +1515,36 @@ class PresympGPTBlock(nn.Module):
             # a Nesterov step; the updated P is what the next layer's attention sees.
             # This eliminates the independent v stream entirely.
             beta = self.beta_mlp()
-            x_in = x + mu * p
+            p_base = p
+            if self._token_conditioned_init and k == 0:
+                _warn_once(
+                    self,
+                    'layer0_mlp_p_lookahead',
+                    'Disabled layer-0 MLP lookahead through the momentum stream because the initial momentum is token-conditioned. '
+                    'Using P directly in the first MLP lookahead is an autoregressive shortcut.',
+                )
+                p_base = torch.zeros_like(p)
+            x_in = x + mu * p_base
             dx = self.mlp(self.ln_x_mlp(x_in))
-            p = beta * p + gamma * dx
+            p = beta * p_base + gamma * dx
             p = self.ln_v_mlp(p)
             x = x + p
             # v is unused in this mode; pass through unchanged
         else:
             # Default: Nesterov-accelerated MLP velocity stream (learned)
             beta = self.beta_mlp()
-            x_in = x + mu * v
+            v_base = v
+            if self._token_conditioned_init and k == 0:
+                _warn_once(
+                    self,
+                    'layer0_mlp_v_lookahead',
+                    'Disabled layer-0 MLP lookahead through the learned velocity stream because v0 is token-conditioned. '
+                    'This would otherwise leak token identity around the causal attention step.',
+                )
+                v_base = torch.zeros_like(v)
+            x_in = x + mu * v_base
             dx = self.mlp(self.ln_x_mlp(x_in))
-            v = beta * v + gamma * dx
+            v = beta * v_base + gamma * dx
             v = self.ln_v_mlp(v)
             x = x + v
 
@@ -1524,6 +1566,12 @@ class PresympMLPSubstep(nn.Module):
         self.mu_mlp = ConstrainedScalar(0.9, "unit")
         self.beta_mlp = ConstrainedScalar(0.9, "unit")
         self.gamma_mlp = ConstrainedScalar(1.0, "pos")
+        self._token_conditioned_init = False
+        self._layer_idx = None
+
+    def set_layer_context(self, *, layer_idx: Optional[int] = None, token_conditioned_init: bool = False) -> None:
+        self._layer_idx = None if layer_idx is None else int(layer_idx)
+        self._token_conditioned_init = bool(token_conditioned_init)
 
     def forward(self, x: torch.Tensor, v: torch.Tensor, v_attn: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
         mu = self.mu_mlp()
@@ -1539,9 +1587,18 @@ class PresympMLPSubstep(nn.Module):
             return x, v
 
         beta = self.beta_mlp()
-        x_in = x + mu * v
+        v_base = v
+        if self._token_conditioned_init and self._layer_idx == 0:
+            _warn_once(
+                self,
+                'layer0_mlp_v_lookahead',
+                'Disabled layer-0 MLP lookahead through the learned velocity stream because v0 is token-conditioned. '
+                'This would otherwise leak token identity around the causal attention step.',
+            )
+            v_base = torch.zeros_like(v)
+        x_in = x + mu * v_base
         dx = self.mlp(self.ln_x_mlp(x_in))
-        v = beta * v + gamma * dx
+        v = beta * v_base + gamma * dx
         v = self.ln_v_mlp(v)
         x = x + v
         return x, v
@@ -1566,7 +1623,7 @@ class PresympModelAB2(nn.Module):
         eta_init: Optional[float] = None,
         eta_clip: float = 50.0,
         presymp_lnp: str = "end",
-        use_v0_init: bool = True,
+        use_v0_init: bool = False,
         mlp_use_attn_vel: bool = False,
         mlp_use_p_vel: bool = False,
         no_mlp: bool = False,
@@ -1592,7 +1649,7 @@ class PresympModelAB2(nn.Module):
         self.drop = nn.Dropout(cfg.dropout)
 
         self.attn = nn.ModuleList([
-            DampedEulerAttention(
+            TheoryDampedEulerAttention(
                 cfg,
                 h=h,
                 t0=t0,
@@ -1657,6 +1714,8 @@ class PresympModelAB2(nn.Module):
         dp_prev = None
 
         for k in range(self.cfg.n_layer):
+            if hasattr(self.attn[k], "set_layer_context"):
+                self.attn[k].set_layer_context(layer_idx=k, token_conditioned_init=self.use_v0_init)
             hX_k = self.attn[k].hX()  # position step size (tensor)
             hY_k = self.attn[k].hY()  # momentum step size (tensor)
             dx_k, dp_k = self.attn[k].rhs(x, p, k)
@@ -1688,6 +1747,7 @@ class PresympModelAB2(nn.Module):
         self.last_h_mean = sum(h_vals) / len(h_vals)
         # xi is not used in AB2 (DampedEulerAttention has no theta_xi_raw)
         self.last_xi_mean = float('nan')
+        self.last_leak_warnings = sum(int(getattr(attn, "_leak_warning_count", 0)) for attn in self.attn)
 
         # Collect eta schedule coefficients (mean across layers)
         c_log_sum = 0.0; c_lin_sum = 0.0; c_cnt = 0
@@ -1768,6 +1828,7 @@ class PresympModelETDAB2(PresympModelAB2):
         h_vals = [self.attn[k].h().detach().cpu().item() for k in range(self.cfg.n_layer)]
         self.last_h_mean = sum(h_vals) / len(h_vals)
         self.last_xi_mean = float('nan')
+        self.last_leak_warnings = sum(int(getattr(attn, "_leak_warning_count", 0)) for attn in self.attn)
 
         # Collect eta schedule coefficients (mean across layers)
         c_log_sum = 0.0; c_lin_sum = 0.0; c_cnt = 0
@@ -1783,6 +1844,249 @@ class PresympModelETDAB2(PresympModelAB2):
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
+
+
+
+class _TheorySoftmaxAttentionMixin:
+    """Exact softmax Hamiltonian oracle with optional potential term and leak diagnostics."""
+
+    def _theory_init(self, *, include_potential: bool = True, leak_check: bool = True, leak_tol: float = 1e-7):
+        self.include_potential = bool(include_potential)
+        self.leak_check = bool(leak_check)
+        self.leak_tol = float(leak_tol)
+        self._token_conditioned_init = False
+        self._layer_idx = None
+        self._leak_warning_count = 0
+        self._leak_warning_keys = set()
+
+    def set_layer_context(self, *, layer_idx: Optional[int] = None, token_conditioned_init: bool = False) -> None:
+        self._layer_idx = None if layer_idx is None else int(layer_idx)
+        self._token_conditioned_init = bool(token_conditioned_init)
+
+    def _lookahead_allowed(self) -> bool:
+        if not getattr(self, 'lookahead', False):
+            return False
+        if getattr(self, '_token_conditioned_init', False) and getattr(self, '_layer_idx', None) == 0:
+            if getattr(self, 'leak_check', False):
+                _warn_once(
+                    self,
+                    'layer0_token_conditioned_lookahead',
+                    'Disabled layer-0 attention lookahead because the momentum/velocity stream is token-conditioned at initialization. '
+                    'This creates a direct autoregressive shortcut and is unsafe for leak-free next-token evaluation.',
+                )
+            return False
+        return True
+
+    def _la_input(self, X: torch.Tensor, P: torch.Tensor) -> torch.Tensor:
+        if not self._lookahead_allowed():
+            return X
+        return X + self.mu_la() * P
+
+    def _theory_B_matrix(self) -> torch.Tensor:
+        if hasattr(self, '_get_B'):
+            return self._get_B()
+        d = self.cfg.n_embd
+        device_type = self.c_attn.weight.device.type
+        with torch.autocast(device_type=device_type, enabled=False):
+            W_Q = self.c_attn.weight[:d,    :].float()
+            W_K = self.c_attn.weight[d:2*d, :].float()
+            W_V = self.c_attn.weight[2*d:,  :].float()
+            A_eff = ((self.scale / self.n_head) * (W_Q.T @ W_K)).float()
+            A_reg = A_eff + 1e-6 * torch.eye(d, device=A_eff.device, dtype=torch.float32)
+            B_raw = torch.linalg.solve(A_reg.T, W_V.T).T
+            return (B_raw + B_raw.T) / 2
+
+    def _B_times(self, P: torch.Tensor) -> torch.Tensor:
+        B = self._theory_B_matrix().to(device=P.device, dtype=P.dtype)
+        return torch.matmul(P, B.T)
+
+    def _check_future_attention_mass(self, E: torch.Tensor) -> None:
+        if not getattr(self, 'leak_check', False) or not getattr(self, 'causal', True):
+            return
+        leak = _future_mass(E)
+        if leak > self.leak_tol:
+            _warn_once(
+                self,
+                'future_attention_mass',
+                f'Causal masking check failed: max masked future-kernel mass is {leak:.3e}. '
+                'This indicates an actual future-token information leak.',
+            )
+
+    def _physical_hamiltonian_cache(self, X: torch.Tensor, P: torch.Tensor):
+        x_ln = self.ln(self._la_input(X, P))
+        q, k, _ = self._qkv(x_ln)
+        E, z = self._kernel_E_z(q, k)
+        self._check_future_attention_mass(E)
+        BP = self._B_times(P)
+        kin = 0.5 * ((BP * P).sum(dim=-1) / z)
+        pot = (-0.5 * E.sum(dim=(-1, -2))) if self.include_potential else torch.zeros_like(kin.sum(dim=-1))
+        H = kin.sum(dim=-1) + pot
+        Fv = BP / z.unsqueeze(-1)
+        return Fv, H, E, z, x_ln
+
+    def _force_from_physical_hamiltonian(self, X: torch.Tensor, P: torch.Tensor, *, force_scale: Optional[torch.Tensor] = None):
+        if force_scale is None:
+            force_scale = 1.0
+        if torch.is_grad_enabled():
+            Fv, H, E, z, x_ln = self._physical_hamiltonian_cache(X, P)
+            G = -torch.autograd.grad(H.sum(), x_ln, create_graph=True)[0]
+            G = self.resid_drop(G)
+            return Fv, G * force_scale, E, z, x_ln
+
+        with torch.enable_grad():
+            Xd = X.detach()
+            Pd = P.detach()
+            x_ln = self.ln(self._la_input(Xd, Pd)).detach().requires_grad_(True)
+            q, k, _ = self._qkv(x_ln)
+            E, z = self._kernel_E_z(q, k)
+            self._check_future_attention_mass(E)
+            BP = self._B_times(Pd)
+            kin = 0.5 * ((BP * Pd).sum(dim=-1) / z)
+            pot = (-0.5 * E.sum(dim=(-1, -2))) if self.include_potential else torch.zeros_like(kin.sum(dim=-1))
+            H = kin.sum(dim=-1) + pot
+            Fv = BP / z.unsqueeze(-1)
+            G = -torch.autograd.grad(H.sum(), x_ln)[0]
+            G = self.resid_drop(G)
+        return Fv.detach(), (G * force_scale).detach(), E.detach(), z.detach(), x_ln.detach()
+
+
+class TheoryDampedEulerAttention(_TheorySoftmaxAttentionMixin, DampedEulerAttention):
+    def __init__(self, *args, include_potential: bool = True, leak_check: bool = True, leak_tol: float = 1e-7, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._theory_init(include_potential=include_potential, leak_check=leak_check, leak_tol=leak_tol)
+
+    def _F_E_z_xln(self, X: torch.Tensor, P: torch.Tensor):
+        Fv, _G, E, z, x_ln = self._force_from_physical_hamiltonian(X, P)
+        return Fv, E, z, x_ln
+
+    def _G_from_cache(self, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor, x_ln: torch.Tensor) -> torch.Tensor:
+        if torch.is_grad_enabled():
+            BP = self._B_times(P)
+            kin = 0.5 * ((BP * P).sum(dim=-1) / z)
+            pot = (-0.5 * E.sum(dim=(-1, -2))) if self.include_potential else torch.zeros_like(kin.sum(dim=-1))
+            H = kin.sum(dim=-1) + pot
+            G = -torch.autograd.grad(H.sum(), x_ln, create_graph=True)[0]
+            return self.resid_drop(G)
+        with torch.enable_grad():
+            x_work = x_ln.detach().requires_grad_(True)
+            q, k, _ = self._qkv(x_work)
+            E2, z2 = self._kernel_E_z(q, k)
+            self._check_future_attention_mass(E2)
+            BP = self._B_times(P.detach())
+            kin = 0.5 * ((BP * P.detach()).sum(dim=-1) / z2)
+            pot = (-0.5 * E2.sum(dim=(-1, -2))) if self.include_potential else torch.zeros_like(kin.sum(dim=-1))
+            H = kin.sum(dim=-1) + pot
+            G = -torch.autograd.grad(H.sum(), x_work)[0]
+            return self.resid_drop(G).detach()
+
+    def FG_alpha(self, X: torch.Tensor, P: torch.Tensor, k: int):
+        device, dtype = X.device, X.dtype
+        h = self.h().item()
+        tk = self.sched.t0 + float(k) * h
+        Fv, Gv, _E, z, _x_ln = self._force_from_physical_hamiltonian(X, P)
+        alpha = self.sched.alpha(tk, device, dtype)
+        return Fv, Gv, z, alpha
+
+
+class TheoryDampedExpEulerAttention(TheoryDampedEulerAttention):
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int):
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX()
+        hY_t = self.hY()
+        hX_f = hX_t.detach().item()
+        tk = self.sched.t0 + float(k) * hX_f
+        Fv, Gv, z, _alpha = self.FG_alpha(Xk, Pk, k)
+        d_eta = self.sched.delta_eta_tensor(tk, hY_t, device, dtype)
+        sigma = torch.exp(-d_eta)
+        alpha_eff = d_eta / hY_t.clamp(min=1e-8)
+        eps = torch.tensor(1e-8, device=device, dtype=dtype)
+        w = torch.where(alpha_eff.abs() > eps, (1.0 - sigma) / alpha_eff, hY_t)
+        Pk1 = sigma * Pk + w * Gv
+        Xk1 = Xk + hX_t * Fv
+        if self.presymp_lnp != 'none':
+            Pk1 = self._apply_lnp(Pk1)
+        self.last_h = hX_f
+        self.last_hY = hY_t.detach().item()
+        return Xk1, Pk1
+
+
+class TheoryPlainEulerAttention(TheoryDampedEulerAttention):
+    def __init__(self, *args, alpha_init: float = 0.9, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.alpha_plain = ConstrainedScalar(alpha_init, 'unit')
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, k: int):
+        hX_t = self.hX()
+        hY_t = self.hY()
+        hX_f = hX_t.detach().item()
+        Fv, Gv, _z, _alpha = self.FG_alpha(Xk, Pk, k)
+        Xk1 = Xk + hX_t * Fv
+        alpha_k = self.alpha_plain()
+        Pk1 = alpha_k * Pk + hY_t * Gv
+        if self.presymp_lnp != 'none':
+            Pk1 = self._apply_lnp(Pk1)
+        self.last_h = hX_f
+        self.last_hY = hY_t.detach().item()
+        return Xk1, Pk1
+
+
+class TheoryPresymplecticSoftmaxAttention(_TheorySoftmaxAttentionMixin, PresymplecticSoftmaxAttention):
+    def __init__(self, *args, include_potential: bool = True, leak_check: bool = True, leak_tol: float = 1e-7, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._theory_init(include_potential=include_potential, leak_check=leak_check, leak_tol=leak_tol)
+
+    def _vel(self, t: float, X: torch.Tensor, Pi: torch.Tensor) -> torch.Tensor:
+        device, dtype = X.device, X.dtype
+        lam = self.sched.exp_minus_eta(t, device, dtype)
+        p = lam * Pi
+        Fv, _G, _E, _z, _x = self._force_from_physical_hamiltonian(X, p)
+        return Fv
+
+    def _force(self, t: float, X: torch.Tensor, Pi: torch.Tensor) -> torch.Tensor:
+        device, dtype = X.device, X.dtype
+        Lam = self.sched.exp_eta(t, device, dtype)
+        lam = self.sched.exp_minus_eta(t, device, dtype)
+        p = lam * Pi
+        _Fv, Gv, _E, _z, _x = self._force_from_physical_hamiltonian(X, p, force_scale=Lam)
+        return Gv
+
+    def _oracle(self, t: float, X: torch.Tensor, Pi: torch.Tensor):
+        device, dtype = X.device, X.dtype
+        Lam = self.sched.exp_eta(t, device, dtype)
+        lam = self.sched.exp_minus_eta(t, device, dtype)
+        p = lam * Pi
+        Fv, Gv, _E, _z, _x = self._force_from_physical_hamiltonian(X, p, force_scale=Lam)
+        return Fv, Gv
+
+
+class TheoryHalfDampStrangAttention(_TheorySoftmaxAttentionMixin, HalfDampStrangAttention):
+    def __init__(self, *args, include_potential: bool = True, leak_check: bool = True, leak_tol: float = 1e-7, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._theory_init(include_potential=include_potential, leak_check=leak_check, leak_tol=leak_tol)
+
+    def _F_E_z_xln(self, X: torch.Tensor, P: torch.Tensor):
+        Fv, _G, E, z, x_ln = self._force_from_physical_hamiltonian(X, P)
+        return Fv, E, z, x_ln
+
+    def _G_from_cache(self, P: torch.Tensor, E: torch.Tensor, z: torch.Tensor, x_ln: torch.Tensor) -> torch.Tensor:
+        if torch.is_grad_enabled():
+            BP = self._B_times(P)
+            kin = 0.5 * ((BP * P).sum(dim=-1) / z)
+            pot = (-0.5 * E.sum(dim=(-1, -2))) if self.include_potential else torch.zeros_like(kin.sum(dim=-1))
+            H = kin.sum(dim=-1) + pot
+            G = -torch.autograd.grad(H.sum(), x_ln, create_graph=True)[0]
+            return self.resid_drop(G)
+        with torch.enable_grad():
+            x_work = x_ln.detach().requires_grad_(True)
+            q, k, _ = self._qkv(x_work)
+            E2, z2 = self._kernel_E_z(q, k)
+            self._check_future_attention_mass(E2)
+            BP = self._B_times(P.detach())
+            kin = 0.5 * ((BP * P.detach()).sum(dim=-1) / z2)
+            pot = (-0.5 * E2.sum(dim=(-1, -2))) if self.include_potential else torch.zeros_like(kin.sum(dim=-1))
+            H = kin.sum(dim=-1) + pot
+            G = -torch.autograd.grad(H.sum(), x_work)[0]
+            return self.resid_drop(G).detach()
 
 
 
@@ -2108,7 +2412,7 @@ class LinAttnAB2Model(nn.Module):
         eta_init: Optional[float] = None,
         eta_clip: float = 50.0,
         presymp_lnp: str = "end",
-        use_v0_init: bool = True,
+        use_v0_init: bool = False,
         no_mlp: bool = False,
     ):
         super().__init__()
@@ -2250,7 +2554,7 @@ class LinAttnETDAB2Model(nn.Module):
         eta_init: Optional[float] = None,
         eta_clip: float = 50.0,
         presymp_lnp: str = "end",
-        use_v0_init: bool = True,
+        use_v0_init: bool = False,
         no_mlp: bool = False,
     ):
         super().__init__()
@@ -2551,7 +2855,7 @@ class PresympModel(nn.Module):
         eta_init: Optional[float] = None,
         eta_clip: float = 50.0,
         presymp_lnp: str = "end",
-        use_v0_init: bool = True,
+        use_v0_init: bool = False,
         # xi adaptation options
         # xi_adapt: bool = False,
         r_thresh: float = 1e-2,
@@ -2674,6 +2978,11 @@ class PresympModel(nn.Module):
         hY_sum = 0.0
         h_cnt = 0
         for k, blk in enumerate(self.blocks):
+            attn = getattr(blk, "attn", None)
+            if attn is not None and hasattr(attn, "set_layer_context"):
+                attn.set_layer_context(layer_idx=k, token_conditioned_init=self.use_v0_init)
+            if hasattr(blk, '_token_conditioned_init'):
+                blk._token_conditioned_init = self.use_v0_init
             x, p, v = blk(x, p, v, k)
             attn = getattr(blk, 'attn', None)
             if attn is not None and hasattr(attn, 'last_rX'):
@@ -2692,6 +3001,7 @@ class PresympModel(nn.Module):
         self.last_xi_mean = (xi_sum / xi_cnt) if xi_cnt > 0 else float('nan')
         self.last_h_mean = (h_sum / h_cnt) if h_cnt > 0 else float('nan')
         self.last_hY_mean = (hY_sum / h_cnt) if h_cnt > 0 else float('nan')
+        self.last_leak_warnings = sum(int(getattr(getattr(blk, "attn", None), "_leak_warning_count", 0)) for blk in self.blocks)
 
         # Collect eta schedule coefficients (mean across layers that have a sched)
         c_log_sum = 0.0; c_lin_sum = 0.0; c_cnt = 0
@@ -2911,6 +3221,8 @@ class LinAttnEulerModel(nn.Module):
             x_new, y_new = self.attn[k].step(x, y)
             if not self.no_mlp:
                 v_attn = (x_new - x) / self.attn[k].h().clamp(min=1e-8)
+                if hasattr(self.mlp_steps[k], 'set_layer_context'):
+                    self.mlp_steps[k].set_layer_context(layer_idx=k, token_conditioned_init=self.use_v0_init)
                 x_new, v = self.mlp_steps[k](x_new, v, v_attn=v_attn)
             x, y = x_new, y_new
 

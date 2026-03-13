@@ -259,6 +259,11 @@ def main():
         action="store_true",
         help="disable separate token/pos v0 embeddings for initializing velocity/momentum (momentum variants only)",
     )
+    ap.add_argument(
+        "--allow_token_conditioned_v0_init",
+        action="store_true",
+        help="opt back into token-conditioned v0 initialisation. Unsafe for leak-free autoregressive evaluation and therefore disabled by default for presymplectic softmax models.",
+    )
 
     # YuriiFormer noise + restart (applied across depth)
     ap.add_argument("--yurii_noise_eta", type=float, default=0.0, help="noise variance scale eta in sigma_t^2 = eta/(1+t)^gamma")
@@ -291,6 +296,18 @@ def main():
     ap.add_argument("--device", type=str, default="cuda")
 
     args = ap.parse_args()
+
+    presymp_softmax_arches = {"presymp", "presymp_euler", "presymp_exp_euler", "presymp_ab2", "presymp_etd_ab2", "presymp_strang", "plain_euler"}
+    if args.arch in presymp_softmax_arches and not args.allow_token_conditioned_v0_init:
+        args.no_v0_init = True
+    elif args.arch in presymp_softmax_arches and args.allow_token_conditioned_v0_init:
+        warnings.warn(
+            "Token-conditioned v0 initialisation was explicitly re-enabled. This can create an autoregressive shortcut in the momentum stream; leak checks will warn at runtime if it becomes unsafe.",
+            RuntimeWarning,
+        )
+
+    if args.arch in presymp_softmax_arches and not args.presymp_mlp_use_attn_vel and not args.presymp_mlp_use_p_vel:
+        args.presymp_mlp_use_attn_vel = True
 
     # Use per-run directory to avoid collisions when running multiple arch variants.
     run_dir = os.path.join(args.out_dir, args.arch)
@@ -689,7 +706,7 @@ def main():
     # tokens_cum: cumulative tokens processed since step 0
     ensure_csv_header(
         metrics_path,
-        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "hY_mean", "xi_mean", "rX", "rP", "c_log_mean", "c_lin_mean"],
+        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "hY_mean", "xi_mean", "rX", "rP", "c_log_mean", "c_lin_mean", "leak_warnings"],
     )
     plot_path = os.path.join(run_dir, "loss.png")
 
@@ -739,7 +756,7 @@ def main():
             if args.arch == "yurii_lt" and args.yurii_restart != "none":
                 extra = f" | restarts {restarts_accum}"
             if (args.arch.startswith("presymp") or args.arch in ("plain_euler", "lin_presymp", "lin_exp_euler", "lin_ab2", "lin_etd_ab2")) and hasattr(model, "last_xi_mean"):
-                extra += f" | hX {getattr(model, 'last_h_mean', float('nan')):.4g} | hY {getattr(model, 'last_hY_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e} | c_log {getattr(model, 'last_c_log_mean', float('nan')):.4g} | c_lin {getattr(model, 'last_c_lin_mean', float('nan')):.4g}"
+                extra += f" | hX {getattr(model, 'last_h_mean', float('nan')):.4g} | hY {getattr(model, 'last_hY_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e} | c_log {getattr(model, 'last_c_log_mean', float('nan')):.4g} | c_lin {getattr(model, 'last_c_lin_mean', float('nan')):.4g} | leak_warn {int(getattr(model, 'last_leak_warnings', 0))}"
             print(
                 f"[{args.arch}] step {step:6d} | loss {loss_accum:.4f} | lr {lr:.2e} | "
                 f"toks/step {toks_per_step} | wall_dt {dt:.2f}s | wall {wall_cum:.1f}s{extra}"
@@ -762,6 +779,7 @@ def main():
                     f"{getattr(model, 'last_rP_max', '')}",
                     f"{getattr(model, 'last_c_log_mean', '')}",
                     f"{getattr(model, 'last_c_lin_mean', '')}",
+                    f"{getattr(model, 'last_leak_warnings', '')}",
                 ],
             )
 
@@ -786,6 +804,7 @@ def main():
                     f"{getattr(model, 'last_rP_max', '')}",
                     f"{getattr(model, 'last_c_log_mean', '')}",
                     f"{getattr(model, 'last_c_lin_mean', '')}",
+                    f"{getattr(model, 'last_leak_warnings', '')}",
                 ],
             )
             # checkpoint best
