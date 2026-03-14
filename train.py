@@ -816,9 +816,10 @@ def main():
     # wall_cum_s: cumulative wall time since start of run
     # tokens_step: tokens processed per optimizer step
     # tokens_cum: cumulative tokens processed since step 0
+    # sched_t_start / sched_t_end: cumulative schedule clock reported by the model (when available)
     ensure_csv_header(
         metrics_path,
-        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "hY_mean", "xi_mean", "rX", "rP", "c_log_mean", "c_lin_mean", "leak_warnings"],
+        ["step", "train_loss", "val_loss", "lr", "wall_dt_s", "wall_cum_s", "tokens_step", "tokens_cum", "h_mean", "hY_mean", "xi_mean", "rX", "rP", "c_log_mean", "c_lin_mean", "leak_warnings", "sched_t_start", "sched_t_end"],
     )
     plot_path = os.path.join(run_dir, "loss.png")
 
@@ -869,6 +870,8 @@ def main():
                 extra = f" | restarts {restarts_accum}"
             if (args.arch.startswith("presymp") or args.arch in ("plain_euler", "lin_presymp", "lin_exp_euler", "lin_ab2", "lin_etd_ab2")) and hasattr(model, "last_xi_mean"):
                 extra += f" | hX {getattr(model, 'last_h_mean', float('nan')):.4g} | hY {getattr(model, 'last_hY_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e} | c_log {getattr(model, 'last_c_log_mean', float('nan')):.4g} | c_lin {getattr(model, 'last_c_lin_mean', float('nan')):.4g} | leak_warn {int(getattr(model, 'last_leak_warnings', 0))}"
+                if hasattr(model, 'last_t_start') or hasattr(model, 'last_t_end'):
+                    extra += f" | t_sched0 {getattr(model, 'last_t_start', float('nan')):.4g} | t_sched1 {getattr(model, 'last_t_end', float('nan')):.4g}"
             print(
                 f"[{args.arch}] step {step:6d} | loss {loss_accum:.4f} | lr {lr:.2e} | "
                 f"toks/step {toks_per_step} | wall_dt {dt:.2f}s | wall {wall_cum:.1f}s{extra}"
@@ -892,6 +895,8 @@ def main():
                     f"{getattr(model, 'last_c_log_mean', '')}",
                     f"{getattr(model, 'last_c_lin_mean', '')}",
                     f"{getattr(model, 'last_leak_warnings', '')}",
+                    f"{getattr(model, 'last_t_start', '')}",
+                    f"{getattr(model, 'last_t_end', '')}",
                 ],
             )
 
@@ -919,6 +924,8 @@ def main():
                     f"{getattr(model, 'last_c_log_mean', '')}",
                     f"{getattr(model, 'last_c_lin_mean', '')}",
                     f"{getattr(model, 'last_leak_warnings', '')}",
+                    f"{getattr(model, 'last_t_start', '')}",
+                    f"{getattr(model, 'last_t_end', '')}",
                 ],
             )
             # checkpoint best
