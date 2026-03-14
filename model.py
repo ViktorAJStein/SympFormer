@@ -3333,3 +3333,71 @@ class LinAttnPresympModel(nn.Module):
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
         return logits, loss
+
+
+@torch.no_grad()
+def _generic_generate(
+    self,
+    idx: torch.Tensor,
+    max_new_tokens: int,
+    temperature: float = 1.0,
+    top_k: Optional[int] = None,
+    do_sample: bool = True,
+    eos_token_id: Optional[int] = None,
+    global_step: Optional[int] = None,
+) -> torch.Tensor:
+    """
+    Autoregressively extend token ids in `idx`.
+    """
+    was_training = self.training
+    self.eval()
+    try:
+        for _ in range(int(max_new_tokens)):
+            idx_cond = idx[:, -self.cfg.block_size:]
+            logits, _ = self(idx_cond, targets=None, global_step=global_step)
+            logits = logits[:, -1, :]
+
+            if temperature is None or float(temperature) <= 0.0:
+                idx_next = torch.argmax(logits, dim=-1, keepdim=True)
+            else:
+                logits = logits / float(temperature)
+                if top_k is not None and int(top_k) > 0:
+                    k = min(int(top_k), logits.size(-1))
+                    v, _ = torch.topk(logits, k, dim=-1)
+                    cutoff = v[:, [-1]]
+                    logits = logits.masked_fill(logits < cutoff, float("-inf"))
+                if do_sample:
+                    probs = F.softmax(logits, dim=-1)
+                    idx_next = torch.multinomial(probs, num_samples=1)
+                else:
+                    idx_next = torch.argmax(logits, dim=-1, keepdim=True)
+
+            idx = torch.cat((idx, idx_next), dim=1)
+
+            if eos_token_id is not None and bool(torch.all(idx_next == int(eos_token_id))):
+                break
+    finally:
+        if was_training:
+            self.train()
+    return idx
+
+
+def _attach_generate_method() -> None:
+    classes = [
+        GPTModel,
+        YuriiFormerModel,
+        PresympModel,
+        PresympModelAB2,
+        PresympModelETDAB2,
+        LinAttnModel,
+        LinAttnYuriiModel,
+        LinAttnEulerModel,
+        LinAttnPresympModel,
+        LinAttnAB2Model,
+        LinAttnETDAB2Model,
+    ]
+    for cls in classes:
+        setattr(cls, "generate", _generic_generate)
+
+
+_attach_generate_method()

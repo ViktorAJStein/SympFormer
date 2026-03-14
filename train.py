@@ -3,6 +3,7 @@ import argparse
 import os
 import time
 import csv
+import warnings
 from dataclasses import asdict
 
 import numpy as np
@@ -12,6 +13,99 @@ from torch.optim import AdamW
 
 from data import DataConfig, BlockEpochIterator, load_bin
 from model import ModelConfig, GPTModel, YuriiFormerModel, PresympModel, PresympModelAB2, PresympModelETDAB2, LinAttnModel, LinAttnYuriiModel, LinAttnEulerModel, LinAttnPresympModel, LinAttnAB2Model, LinAttnETDAB2Model
+
+
+def maybe_get_tokenizer():
+    try:
+        import tiktoken
+    except Exception as e:
+        print(f"[sample] tiktoken unavailable ({e}); decoded text samples disabled")
+        return None
+    try:
+        return tiktoken.get_encoding("gpt2")
+    except Exception as e:
+        print(f"[sample] failed to load GPT-2 tokenizer ({e}); decoded text samples disabled")
+        return None
+
+
+def _find_story_start(tokens: np.ndarray, eot_token: int = 50256) -> int:
+    if len(tokens) == 0:
+        return 0
+    hit = np.flatnonzero(tokens == eot_token)
+    if hit.size == 0:
+        return 0
+    start = int(hit[0]) + 1
+    return min(start, max(0, len(tokens) - 1))
+
+
+def build_prompt_tokens(args, dataset_tokens: np.ndarray, enc):
+    if args.sample_prompt:
+        if enc is None:
+            raise RuntimeError("A text prompt requires tiktoken to be installed.")
+        toks = enc.encode_ordinary(args.sample_prompt)
+        if len(toks) == 0:
+            raise RuntimeError("The provided sample prompt tokenized to an empty sequence.")
+        toks = toks[-args.block_size:]
+        return torch.tensor(toks, dtype=torch.long).unsqueeze(0), "prompt"
+
+    if len(dataset_tokens) < 2:
+        raise RuntimeError("Not enough dataset tokens to build a sample prompt.")
+
+    start = _find_story_start(dataset_tokens)
+    n_pref = max(1, int(args.sample_prefix_tokens))
+    end = min(start + n_pref, len(dataset_tokens) - 1)
+    if end <= start:
+        start = 0
+        end = min(n_pref, len(dataset_tokens) - 1)
+    toks = dataset_tokens[start:end].astype(np.int64)
+    return torch.from_numpy(toks).unsqueeze(0), "val_prefix"
+
+
+@torch.no_grad()
+def print_sample(
+    model: nn.Module,
+    dataset_tokens: np.ndarray,
+    device: str,
+    args,
+    global_step: int,
+):
+    if int(args.sample_interval) <= 0:
+        return
+
+    enc = maybe_get_tokenizer()
+    prompt_cpu, prompt_kind = build_prompt_tokens(args, dataset_tokens, enc)
+    prompt = prompt_cpu.to(device)
+
+    out = model.generate(
+        prompt,
+        max_new_tokens=int(args.sample_max_new_tokens),
+        temperature=float(args.sample_temperature),
+        top_k=(None if int(args.sample_top_k) <= 0 else int(args.sample_top_k)),
+        do_sample=bool(int(args.sample_do_sample)),
+        eos_token_id=(None if int(args.sample_eos_token_id) < 0 else int(args.sample_eos_token_id)),
+        global_step=global_step,
+    )
+    out_cpu = out[0].detach().cpu().tolist()
+    prompt_len = prompt_cpu.shape[1]
+
+    if enc is not None:
+        prompt_text = enc.decode(out_cpu[:prompt_len])
+        gen_text = enc.decode(out_cpu[prompt_len:])
+        full_text = enc.decode(out_cpu)
+        print(f"[sample][step {global_step}] source={prompt_kind}")
+        print("[sample][prompt]")
+        print(prompt_text)
+        print("[sample][continuation]")
+        print(gen_text)
+        print("[sample][full]")
+        print(full_text)
+    else:
+        print(f"[sample][step {global_step}] source={prompt_kind} (token ids only)")
+        print("[sample][prompt_ids]")
+        print(out_cpu[:prompt_len])
+        print("[sample][continuation_ids]")
+        print(out_cpu[prompt_len:])
+
 
 
 def ensure_csv_header(path: str, header):
@@ -294,6 +388,24 @@ def main():
     ap.add_argument("--plot", action="store_true", help="save loss-vs-step plot PNG to out_dir")
     ap.add_argument("--resume", type=str, default="", help="path to checkpoint.pt")
     ap.add_argument("--device", type=str, default="cuda")
+
+    # Text generation / inspection
+    ap.add_argument("--sample_interval", type=int, default=0,
+                    help="If >0, print a decoded text sample every this many training steps (typically at eval time).")
+    ap.add_argument("--sample_max_new_tokens", type=int, default=128,
+                    help="Number of new tokens to generate for each sample.")
+    ap.add_argument("--sample_prefix_tokens", type=int, default=64,
+                    help="Length of validation-prefix context when --sample_prompt is empty.")
+    ap.add_argument("--sample_prompt", type=str, default="",
+                    help="Optional text prompt to seed generation. Requires tiktoken.")
+    ap.add_argument("--sample_temperature", type=float, default=0.8,
+                    help="Sampling temperature. Set <=0 for greedy decoding.")
+    ap.add_argument("--sample_top_k", type=int, default=40,
+                    help="Top-k truncation for sampling. Use <=0 to disable.")
+    ap.add_argument("--sample_do_sample", type=int, default=1,
+                    help="1 = sample from the distribution, 0 = greedy argmax.")
+    ap.add_argument("--sample_eos_token_id", type=int, default=50256,
+                    help="Stop generation once all batch elements emit this token. Use -1 to disable early stop.")
 
     args = ap.parse_args()
 
@@ -786,6 +898,8 @@ def main():
         if step % args.eval_interval == 0 and step > 0:
             val_loss = estimate_loss(model, val_it, device, args.eval_batches, amp_dtype, global_step=step)
             print(f"[{args.arch}][eval] step {step:6d} | val_loss {val_loss:.4f}")
+            if args.sample_interval > 0 and step % args.sample_interval == 0:
+                print_sample(model, val_tokens, device, args, global_step=step)
             append_csv_row(
                 metrics_path,
                 [
@@ -819,6 +933,9 @@ def main():
     torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "step": args.max_steps, "best_val": best_val, "cfg": asdict(mcfg), "args": vars(args)}, ckpt_path)
     print(f"saved final checkpoint -> {ckpt_path}")
     print(f"[{args.arch}] SUMMARY best_val={best_val:.6f} run_dir={run_dir}")
+
+    if args.sample_interval > 0:
+        print_sample(model, val_tokens, device, args, global_step=args.max_steps)
 
     if args.plot:
         plot_metrics_csv(metrics_path, plot_path, title=f"{args.arch} loss")
