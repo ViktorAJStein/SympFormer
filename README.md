@@ -33,9 +33,9 @@ job_lin.job               # example SLURM job for linear-attention variants
 ## Requirements
 
 At minimum:
-- Python 3.10+
-- PyTorch
-- NumPy
+- `Python 3.10+`
+- `PyTorch`
+- `NumPy`
 
 For dataset preprocessing and decoded text sampling:
 - `tiktoken`
