@@ -1,17 +1,16 @@
 # SympFormer
 
-Research code for training and comparing transformer variants with classical, accelerated, and presymplectic-style attention updates.
+Code for training and comparing transformer variants with classical, accelerated, and presymplectic-style attention updates.
 
 The repository currently contains:
 - a baseline GPT-style causal language model,
-- a `yurii_lt` variant,
+- an implementation of the [Yuriiformer](https://arxiv.org/abs/2601.23236) (Zimin et al, 2026) architecture, specifically the Lie-Trotter Nesterov acceleration,
 - several softmax-attention presymplectic / Euler / higher-order variants,
 - several linear-attention analogues,
 - dataset preprocessing scripts for TinyStories and OpenWebText,
 - a training script with checkpointing, metric logging, and optional text sampling,
 - plotting and batch-job helper scripts.
 
-This is a research codebase rather than a packaged library. The main entry points are `train.py`, `model.py`, `data.py`, and the preprocessing scripts.
 
 ---
 
@@ -51,7 +50,7 @@ A minimal setup is:
 pip install torch numpy tiktoken datasets matplotlib
 ```
 
-If you train on GPU, install a PyTorch build compatible with your CUDA setup.
+If you train on a GPU, install a PyTorch build compatible with your CUDA setup.
 
 ---
 
@@ -244,7 +243,7 @@ Common model-size arguments:
 --bias
 ```
 
-Common optimization / logging arguments:
+Common optimization/logging arguments:
 
 ```bash
 --batch_size
@@ -324,7 +323,7 @@ final_<arch>.pt
 loss.png            # when --plot is enabled
 ```
 
-`metrics.csv` contains training and validation losses together with additional run metadata such as learning rate, wall-clock time, cumulative tokens, and, for some architectures, learned step-size / damping statistics.
+`metrics.csv` contains training and validation losses, along with additional run metadata such as learning rate, wall-clock time, cumulative tokens, and, for some architectures, learned step-size/damping statistics.
 
 ---
 
@@ -367,7 +366,7 @@ The repository includes:
 - `job.job` for softmax-attention comparisons,
 - `job_lin.job` for linear-attention comparisons.
 
-These are examples rather than generic launchers. You will likely need to adapt:
+These are examples, not generic launchers. You will likely need to adapt:
 - working directories,
 - Conda environment name,
 - dataset choice,
@@ -377,45 +376,6 @@ These are examples rather than generic launchers. You will likely need to adapt:
 
 ---
 
-## Notes and caveats
-
-- This codebase is organized around experiments, not a stable Python package API.
-- Dataset preprocessing requires internet access at preprocessing time.
-- The training script uses `bfloat16` autocast on CUDA and `float32` on CPU.
-- For the softmax presymplectic family, the code contains safeguards around token-conditioned `v0` initialisation because that can create autoregressive shortcuts in the momentum stream.
-- `--no_mlp` is useful when isolating the behaviour of the attention/update block itself.
-
----
-
-## Reproducibility
-
-The repository uses deterministic token-block iteration logic in `data.py` and stores both the model configuration and training arguments in checkpoints.
-
-For reproducible runs, it is still a good idea to record:
-- commit hash,
-- full command line,
-- environment / package versions,
-- GPU type,
-- dataset preprocessing settings.
-
----
-
-## Suggested citation section
-
-If this repository accompanies a paper or preprint, add a citation block here, for example:
-
-```bibtex
-@misc{stein2026sympformer,
-  title  = {SympFormer},
-  author = {Viktor A. J. Stein},
-  year   = {2026},
-  note   = {GitHub repository}
-}
-```
-
-and, if applicable, a separate entry for the associated paper.
-
----
 
 ## Acknowledgements
 
