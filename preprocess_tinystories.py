@@ -1,5 +1,7 @@
 
 import argparse
+import hashlib
+import json
 import os
 from array import array
 
@@ -35,6 +37,7 @@ def main():
     def dump(split, dset, max_docs, out_path):
         n = len(dset) if max_docs == 0 else min(len(dset), max_docs)
         print(f"[{split}] docs={n} -> {out_path}")
+        digest = hashlib.sha256()
         with open(out_path, "wb") as f:
             buf = array("H")
             for i in range(n):
@@ -47,15 +50,32 @@ def main():
                 buf.extend(toks)
                 # flush periodically
                 if len(buf) > 1_000_000:
-                    buf.tofile(f)
+                    raw = buf.tobytes()
+                    f.write(raw)
+                    digest.update(raw)
                     buf = array("H")
                 if (i + 1) % 1000 == 0:
                     print(f"  processed {i+1}/{n}")
             if len(buf) > 0:
-                buf.tofile(f)
-        # report token count
+                raw = buf.tobytes()
+                f.write(raw)
+                digest.update(raw)
         arr = np.memmap(out_path, dtype=np.uint16, mode="r")
-        print(f"[{split}] tokens={len(arr)}")
+        manifest = {
+            "source": "roneneldan/TinyStories",
+            "split": split,
+            "documents": n,
+            "tokens": len(arr),
+            "bytes": os.path.getsize(out_path),
+            "sha256": digest.hexdigest(),
+            "dtype": "uint16",
+            "tokenizer": "tiktoken:gpt2",
+            "eot_token": eot,
+            "seed": args.seed,
+        }
+        with open(out_path + ".manifest.json", "w", encoding="utf-8") as mf:
+            json.dump(manifest, mf, indent=2, sort_keys=True)
+        print(f"[{split}] tokens={len(arr)} sha256={digest.hexdigest()}")
 
     dump("train", train, args.max_docs_train, os.path.join(args.out_dir, "tinystories_train.bin"))
     dump("val", val, args.max_docs_val, os.path.join(args.out_dir, "tinystories_val.bin"))

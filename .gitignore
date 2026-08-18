@@ -1,0 +1,20 @@
+# Ignore everything by default. Only explicitly allow public repository files.
+*
+
+# Repository metadata and public documentation
+!/.gitignore
+!/README.md
+!/LICENSE
+!/pyproject.toml
+!/uv.lock
+
+# Core source code
+!/*.py
+
+# Model and training configurations
+!/configs/
+!/configs/*.json
+
+# Reproducibility, analysis, plotting, and verification code
+!/scripts/
+!/scripts/*.py

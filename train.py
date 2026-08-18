@@ -1,8 +1,14 @@
 
 import argparse
-import os
-import time
 import csv
+import hashlib
+import json
+import math
+import os
+import platform
+import random
+import subprocess
+import time
 import warnings
 from dataclasses import asdict
 
@@ -12,8 +18,58 @@ import torch.nn as nn
 from torch.optim import AdamW
 
 from data import DataConfig, BlockEpochIterator, load_bin
-from model import ModelConfig, GPTModel, YuriiFormerModel, PresympModel, PresympModelAB2, PresympModelETDAB2, LinAttnModel, LinAttnYuriiModel, LinAttnEulerModel, LinAttnPresympModel, LinAttnAB2Model, LinAttnETDAB2Model
+from model import ModelConfig, GPTModel, YuriiFormerModel, PresympModel, PresympModelAB2, PresympModelETDAB2, LinAttnModel, LinAttnYuriiModel, LinAttnEulerModel, LinAttnPresympModel, LinAttnAB2Model, LinAttnETDAB2Model, LinAttnReducedModel, CausalRiemannianNAGModel
 
+
+class NonFiniteTrainingError(RuntimeError):
+    """Structured failure raised before a nonfinite update can propagate."""
+
+    def __init__(self, kind, step, micro_step=None, value=None, detail=""):
+        self.kind = str(kind)
+        self.step = int(step)
+        self.micro_step = None if micro_step is None else int(micro_step)
+        self.value = None if value is None else str(value)
+        self.detail = str(detail)
+        location = f"step={self.step}"
+        if self.micro_step is not None:
+            location += f" micro_step={self.micro_step}"
+        rendered = f"Nonfinite {self.kind} at {location}"
+        if self.value is not None:
+            rendered += f" value={self.value}"
+        if self.detail:
+            rendered += f": {self.detail}"
+        super().__init__(rendered)
+
+
+def require_finite_scalar(value, *, kind, step, micro_step=None):
+    """Return a scalar value or raise a structured nonfinite failure."""
+    numeric = float(value.detach().item()) if torch.is_tensor(value) else float(value)
+    if not math.isfinite(numeric):
+        raise NonFiniteTrainingError(
+            kind,
+            step,
+            micro_step=micro_step,
+            value=repr(numeric),
+        )
+    return numeric
+
+
+def clip_grad_norm_finite(parameters, max_norm, *, step):
+    """Clip gradients and reject a NaN/Inf total norm before the optimizer step."""
+    effective_max_norm = float(max_norm) if float(max_norm) > 0 else float("inf")
+    try:
+        total_norm = torch.nn.utils.clip_grad_norm_(
+            list(parameters),
+            effective_max_norm,
+            error_if_nonfinite=True,
+        )
+    except RuntimeError as exc:
+        raise NonFiniteTrainingError(
+            "gradient_norm",
+            step,
+            detail=str(exc),
+        ) from exc
+    return require_finite_scalar(total_norm, kind="gradient_norm", step=step)
 
 def maybe_get_tokenizer():
     try:
@@ -68,14 +124,19 @@ def print_sample(
     device: str,
     args,
     global_step: int,
+    *,
+    run_dir: str,
+    force: bool = False,
 ):
-    if int(args.sample_interval) <= 0:
-        return
+    if int(args.sample_interval) <= 0 and not force:
+        return None
 
     enc = maybe_get_tokenizer()
     prompt_cpu, prompt_kind = build_prompt_tokens(args, dataset_tokens, enc)
     prompt = prompt_cpu.to(device)
 
+    was_training = model.training
+    model.eval()
     out = model.generate(
         prompt,
         max_new_tokens=int(args.sample_max_new_tokens),
@@ -85,9 +146,12 @@ def print_sample(
         eos_token_id=(None if int(args.sample_eos_token_id) < 0 else int(args.sample_eos_token_id)),
         global_step=global_step,
     )
+    if was_training:
+        model.train()
     out_cpu = out[0].detach().cpu().tolist()
     prompt_len = prompt_cpu.shape[1]
 
+    prompt_text = gen_text = full_text = None
     if enc is not None:
         prompt_text = enc.decode(out_cpu[:prompt_len])
         gen_text = enc.decode(out_cpu[prompt_len:])
@@ -105,6 +169,26 @@ def print_sample(
         print(out_cpu[:prompt_len])
         print("[sample][continuation_ids]")
         print(out_cpu[prompt_len:])
+
+    record = {
+        "arch": args.arch,
+        "dataset": args.dataset,
+        "run_name": args.run_name,
+        "seed": args.seed,
+        "global_step": global_step,
+        "source": prompt_kind,
+        "do_sample": bool(int(args.sample_do_sample)),
+        "temperature": float(args.sample_temperature),
+        "top_k": None if int(args.sample_top_k) <= 0 else int(args.sample_top_k),
+        "prompt_token_ids": out_cpu[:prompt_len],
+        "continuation_token_ids": out_cpu[prompt_len:],
+        "prompt_text": prompt_text,
+        "continuation_text": gen_text,
+        "full_text": full_text,
+    }
+    with open(os.path.join(run_dir, "samples.jsonl"), "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n")
+    return record
 
 
 
@@ -177,49 +261,117 @@ def cosine_lr(step: int, warmup_steps: int, total_steps: int, peak: float, min_r
     return peak * (min_ratio + (1.0 - min_ratio) * cosine)
 
 
-def build_optimizer(model: nn.Module, peak_lr: float, betas=(0.9, 0.95), scalar_lr_mult: float = 10.0):
-    # Parameter grouping following YuriiFormer Appendix A.3 (AdamW side):
-    # - embeddings: weight decay 0.1
-    # - norms: weight decay 0
-    # - learned scalar update-rule params: weight decay 0, lr multiplier 5x
-    # - everything else: weight decay 0 (Muon would handle matrix weights in the paper; here we keep AdamW wd=0)
-    decay_emb = 0.1
-    scalar_mult = scalar_lr_mult
+class MixedOptimizer:
+    """Minimal common interface for one Muon and one AdamW optimizer."""
 
-    emb_params = []
-    norm_params = []
-    scalar_params = []
-    integrator_params = []  # theta_h/theta_xi_raw
-    other_params = []
+    def __init__(self, muon, adamw):
+        self.muon = muon
+        self.adamw = adamw
+        self.param_groups = muon.param_groups + adamw.param_groups
 
-    for name, p in model.named_parameters():
-        if not p.requires_grad:
+    def zero_grad(self, set_to_none=True):
+        self.muon.zero_grad(set_to_none=set_to_none)
+        self.adamw.zero_grad(set_to_none=set_to_none)
+
+    def step(self):
+        self.muon.step()
+        self.adamw.step()
+
+    def state_dict(self):
+        return {"kind": "muon_adamw", "muon": self.muon.state_dict(), "adamw": self.adamw.state_dict()}
+
+    def load_state_dict(self, state):
+        if state.get("kind") != "muon_adamw":
+            raise ValueError("Checkpoint optimizer does not contain mixed Muon+AdamW state")
+        self.muon.load_state_dict(state["muon"])
+        self.adamw.load_state_dict(state["adamw"])
+
+
+def initialize_learned_v0_tables(model: nn.Module, seed: int) -> int:
+    """Initialize explicit learned-v0 tables identically across architectures.
+
+    Model constructors consume architecture-dependent amounts of random state.
+    A dedicated CPU generator makes the token/position velocity tables an
+    exactly paired initialization for runs sharing ``seed`` without changing
+    any core-model parameters or the global training RNG stream.
+    """
+    generator = torch.Generator(device="cpu")
+    generator.manual_seed(int(seed) + 10_000_019)
+    initialized = 0
+    with torch.no_grad():
+        for name in ("tok_v0_emb", "pos_v0_emb", "tok_v0_emb_mlp", "pos_v0_emb_mlp"):
+            module = getattr(model, name, None)
+            if module is not None:
+                module.weight.normal_(mean=0.0, std=0.02, generator=generator)
+                initialized += module.weight.numel()
+    if initialized == 0:
+        raise ValueError("--learned_v0_init was requested for a model without velocity embedding tables")
+    return initialized
+
+
+def _parameter_buckets(model):
+    embeddings, norms_scalars, matrices = [], [], []
+    scalar_names = ("theta_h", "theta_hX", "theta_hY", "theta_tau", "theta_xi_raw")
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
             continue
-        if ("tok_emb" in name) or ("pos_emb" in name) or ("tok_v0_emb" in name) or ("pos_v0_emb" in name):
-            emb_params.append(p)
-        elif "theta_h" in name or "theta_hX" in name or "theta_hY" in name or "theta_xi_raw" in name:
-            integrator_params.append(p)
-        elif ".raw" in name:  # ConstrainedScalar raw parameters
-            scalar_params.append(p)
-        elif "ln_" in name or ".ln" in name or "ln_f" in name or "ln_v" in name or "LayerNorm" in name:
-            norm_params.append(p)
+        is_embedding = any(token in name for token in ("tok_emb", "pos_emb", "tok_v0_emb", "pos_v0_emb"))
+        is_scalar = name.endswith(".raw") or any(token in name for token in scalar_names)
+        is_norm = "ln_" in name or ".ln" in name or "ln_f" in name or "ln_v" in name
+        if is_embedding:
+            embeddings.append(param)
+        elif is_scalar or is_norm or param.ndim < 2:
+            norms_scalars.append((name, param))
         else:
-            other_params.append(p)
+            matrices.append(param)
+    return embeddings, norms_scalars, matrices
 
-    param_groups = []
-    if other_params:
-        param_groups.append({"params": other_params, "lr": peak_lr, "weight_decay": 0.0})
-    if emb_params:
-        param_groups.append({"params": emb_params, "lr": peak_lr, "weight_decay": decay_emb})
-    if norm_params:
-        param_groups.append({"params": norm_params, "lr": peak_lr, "weight_decay": 0.0})
+
+def build_optimizer(
+    model: nn.Module,
+    peak_lr: float,
+    betas=(0.9, 0.95),
+    scalar_lr_mult: float = 5.0,
+    optimizer_name: str = "muon_adamw",
+    muon_lr: float = 0.02,
+):
+    embeddings, norms_scalars, matrices = _parameter_buckets(model)
+    scalar_params = [p for name, p in norms_scalars if ".raw" in name or "theta_" in name]
+    other_adamw = [p for name, p in norms_scalars if not (".raw" in name or "theta_" in name)]
+
+    if optimizer_name == "adamw":
+        groups = []
+        if matrices:
+            groups.append({"params": matrices, "lr": peak_lr, "weight_decay": 0.0})
+        if embeddings:
+            groups.append({"params": embeddings, "lr": peak_lr, "weight_decay": 0.1})
+        if other_adamw:
+            groups.append({"params": other_adamw, "lr": peak_lr, "weight_decay": 0.0})
+        if scalar_params:
+            groups.append({"params": scalar_params, "lr": peak_lr * scalar_lr_mult, "weight_decay": 0.0, "lr_mult": scalar_lr_mult})
+        return AdamW(groups, betas=betas)
+
+    if optimizer_name != "muon_adamw":
+        raise ValueError(f"Unknown optimizer {optimizer_name!r}")
+    if not matrices:
+        raise ValueError("Muon requires at least one non-embedding matrix parameter")
+
+    muon_mult = muon_lr / peak_lr
+    muon = torch.optim.Muon(
+        [{"params": matrices, "lr": muon_lr, "weight_decay": 0.0, "lr_mult": muon_mult}],
+        lr=muon_lr,
+        momentum=0.95,
+        weight_decay=0.0,
+    )
+    adam_groups = []
+    if embeddings:
+        adam_groups.append({"params": embeddings, "lr": peak_lr, "weight_decay": 0.1})
+    if other_adamw:
+        adam_groups.append({"params": other_adamw, "lr": peak_lr, "weight_decay": 0.0})
     if scalar_params:
-        param_groups.append({"params": scalar_params, "lr": peak_lr * scalar_mult, "weight_decay": 0.0, "lr_mult": scalar_mult})
-    if integrator_params:
-        param_groups.append({"params": integrator_params, "lr": peak_lr * scalar_mult, "weight_decay": 0.0, "lr_mult": scalar_mult})
-
-    opt = AdamW(param_groups, betas=betas)
-    return opt
+        adam_groups.append({"params": scalar_params, "lr": peak_lr * scalar_lr_mult, "weight_decay": 0.0, "lr_mult": scalar_lr_mult})
+    adamw = AdamW(adam_groups, betas=betas)
+    return MixedOptimizer(muon, adamw)
 
 
 @torch.no_grad()
@@ -231,31 +383,214 @@ def estimate_loss(
     amp_dtype: torch.dtype,
     global_step: int,
 ):
+    """Evaluate the same fixed validation batches without advancing ``it``."""
+    iterator_state = it.state_dict()
+    was_training = model.training
     model.eval()
     losses = []
-    for _ in range(eval_batches):
-        xb, yb = next(it)
-        xb = xb.to(device)
-        yb = yb.to(device)
-        with torch.autocast(device_type=device.split(':')[0], dtype=amp_dtype, enabled=(device.startswith("cuda"))):
-            _, loss = model(xb, yb, global_step=global_step)
-        losses.append(loss.item())
-    model.train()
+    try:
+        for _ in range(eval_batches):
+            xb, yb = next(it)
+            xb = xb.to(device)
+            yb = yb.to(device)
+            with torch.autocast(
+                device_type=device.split(':')[0],
+                dtype=amp_dtype,
+                enabled=device.startswith("cuda"),
+            ):
+                _, loss = model(xb, yb, global_step=global_step)
+            losses.append(loss.item())
+    finally:
+        it.load_state_dict(iterator_state)
+        model.train(was_training)
     return float(np.mean(losses))
 
 
+def capture_rng_state():
+    state = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "torch_cpu": torch.get_rng_state(),
+    }
+    if torch.cuda.is_available():
+        state["torch_cuda"] = torch.cuda.get_rng_state_all()
+    return state
+
+
+def restore_rng_state(state):
+    random.setstate(state["python"])
+    np.random.set_state(state["numpy"])
+    torch.set_rng_state(state["torch_cpu"])
+    if "torch_cuda" in state and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(state["torch_cuda"])
+
+
+def source_revision():
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, text=True
+        ).strip()
+    except Exception:
+        return None
+
+
+def source_fingerprint(config_path: str):
+    """Hash the executable source/config even when the checkout has no Git metadata."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        os.path.join(root, "train.py"),
+        os.path.join(root, "model.py"),
+        os.path.join(root, "data.py"),
+        os.path.join(root, "pyproject.toml"),
+        os.path.join(root, "uv.lock"),
+    ]
+    if config_path:
+        candidates.append(
+            config_path if os.path.isabs(config_path) else os.path.join(root, config_path)
+        )
+    combined = hashlib.sha256()
+    records = []
+    seen = set()
+    for path in candidates:
+        normalized = os.path.abspath(path)
+        if normalized in seen or not os.path.isfile(normalized):
+            continue
+        seen.add(normalized)
+        with open(normalized, "rb") as handle:
+            payload = handle.read()
+        try:
+            label = os.path.relpath(normalized, root)
+        except ValueError:
+            label = os.path.basename(normalized)
+        digest = hashlib.sha256(payload).hexdigest()
+        records.append({"path": label, "sha256": digest, "bytes": len(payload)})
+        combined.update(label.encode("utf-8"))
+        combined.update(b"\0")
+        combined.update(payload)
+        combined.update(b"\0")
+    return {"algorithm": "sha256", "sha256": combined.hexdigest(), "files": records}
+
+
+def data_record(path: str, tokens: np.ndarray, require_manifest: bool):
+    """Return validated dataset provenance for the run manifest."""
+    record = {"path": path, "bytes": os.path.getsize(path), "tokens": len(tokens)}
+    sidecar = path + ".manifest.json"
+    if not os.path.exists(sidecar):
+        if require_manifest:
+            raise SystemExit(f"Missing required dataset manifest: {sidecar}")
+        record["manifest"] = None
+        return record
+    with open(sidecar, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    if int(metadata.get("bytes", -1)) != record["bytes"]:
+        raise SystemExit(f"Dataset byte count disagrees with {sidecar}")
+    if int(metadata.get("tokens", -1)) != record["tokens"]:
+        raise SystemExit(f"Dataset token count disagrees with {sidecar}")
+    if metadata.get("dtype") != "uint16":
+        raise SystemExit(f"Unsupported dataset dtype in {sidecar}: {metadata.get('dtype')!r}")
+    record["manifest_path"] = sidecar
+    record["manifest"] = metadata
+    return record
+
+
+def make_checkpoint(model, opt, next_step, best_val, mcfg, args, train_it, val_it, wall_cum_s):
+    return {
+        "format_version": 2,
+        "model": model.state_dict(),
+        "opt": opt.state_dict(),
+        "next_step": int(next_step),
+        "best_val": float(best_val),
+        "cfg": asdict(mcfg),
+        "args": vars(args),
+        "train_iterator": train_it.state_dict(),
+        "val_iterator": val_it.state_dict(),
+        "rng_state": capture_rng_state(),
+        "wall_cum_s": float(wall_cum_s),
+    }
+
+
+def write_nonfinite_failure(
+    run_dir,
+    error,
+    *,
+    model,
+    opt,
+    best_val,
+    mcfg,
+    args,
+    train_it,
+    val_it,
+    wall_cum_s,
+    tokens_per_step,
+    lr,
+):
+    """Persist an auditable diagnostic and a non-resumable forensic checkpoint."""
+    failure_path = os.path.join(run_dir, "failure.json")
+    checkpoint_path = os.path.join(run_dir, f"failure_{args.arch}.pt")
+    payload = {
+        "format_version": 1,
+        "status": "failed_nonfinite",
+        "failure_type": error.kind,
+        "message": str(error),
+        "step": error.step,
+        "micro_step": error.micro_step,
+        "value": error.value,
+        "detail": error.detail,
+        "tokens_completed": int(error.step) * int(tokens_per_step),
+        "wall_cum_s": float(wall_cum_s),
+        "lr": float(lr),
+        "run_name": args.run_name,
+        "arch": args.arch,
+        "seed": int(args.seed),
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+        "checkpoint_resumable": False,
+    }
+    with open(failure_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True, allow_nan=False)
+
+    try:
+        checkpoint = make_checkpoint(
+            model,
+            opt,
+            error.step,
+            best_val,
+            mcfg,
+            args,
+            train_it,
+            val_it,
+            wall_cum_s,
+        )
+        checkpoint["failure"] = dict(payload)
+        checkpoint["resumable"] = False
+        torch.save(checkpoint, checkpoint_path)
+        payload["forensic_checkpoint"] = checkpoint_path
+    except Exception as exc:  # Preserve the primary failure if storage is full.
+        payload["forensic_checkpoint_error"] = repr(exc)
+
+    with open(failure_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True, allow_nan=False)
+    return failure_path, payload.get("forensic_checkpoint")
+
 def main():
-    ap = argparse.ArgumentParser()
+    config_probe = argparse.ArgumentParser(add_help=False)
+    config_probe.add_argument("--config", type=str, default="")
+    config_args, _ = config_probe.parse_known_args()
+    ap = argparse.ArgumentParser(parents=[config_probe])
     ap.add_argument("--data_dir", type=str, default="data")
     ap.add_argument("--dataset", type=str, default="tinystories", choices=["tinystories", "openwebtext"])
     ap.add_argument(
         "--arch",
         type=str,
         default="yurii_lt",
-        choices=["baseline", "yurii_lt", "presymp", "presymp_euler", "presymp_exp_euler", "presymp_ab2", "presymp_etd_ab2", "presymp_strang", "plain_euler", "lin_baseline", "lin_yurii", "lin_euler", "lin_presymp", "lin_exp_euler", "lin_ab2", "lin_etd_ab2"],
+        choices=["baseline", "baseline_capacity", "yurii_lt", "causal_symp_fe", "causal_symp_pe", "causal_symp_exp_pe", "causal_symp_halfdamp_pe", "causal_symp_ab2", "causal_riem_nag_noconn", "causal_riem_nag", "presymp", "presymp_euler", "presymp_exp_euler", "presymp_ab2", "presymp_etd_ab2", "presymp_strang", "plain_euler", "lin_baseline", "lin_yurii", "lin_euler", "lin_presymp", "lin_exp_euler", "lin_ab2", "lin_etd_ab2", "lin_reduced_exp_mid", "lin_reduced_ab2"],
         help="model architecture / attention discretization",
     )
 
+    ap.add_argument(
+        "--lin_noncausal",
+        action="store_true",
+        help="Use global unmasked linear attention. Required by reduced matrix-momentum v3 schemes; invalid for headline next-token quality comparisons.",
+    )
     ap.add_argument(
         "--no_mlp",
         action="store_true",
@@ -291,7 +626,7 @@ def main():
     ap.add_argument("--presymp_xi", type=float, default=1.0)
     ap.add_argument("--presymp_t0", type=float, default=1.0)
     ap.add_argument("--eta_mu", type=float, default=None, help="if set (and --eta_learnable is not used), use fixed linear eta(t)=mu*t instead of eta(t)=3*log(t/t0)")
-    ap.add_argument("--eta_learnable", action="store_true", help="make eta schedule coefficient(s) learnable")
+    ap.add_argument("--eta_learnable", action=argparse.BooleanOptionalAction, default=False, help="make eta schedule coefficient(s) learnable; use --no-eta_learnable for a fixed schedule")
     ap.add_argument(
         "--eta_mode",
         type=str,
@@ -325,9 +660,14 @@ def main():
         default=False,
         help=(
             "Evaluate the presymp oracle at X + mu_la*P instead of X "
-            "(Nesterov lookahead inside the symplectic step). "
-            "mu_la is a per-layer learned scalar initialised near 0 (no-op start)."
+            "(Nesterov lookahead inside the symplectic step)."
         ),
+    )
+    ap.add_argument(
+        "--presymp_lookahead_init",
+        type=float,
+        default=0.001,
+        help="Initial sigmoid-constrained lookahead coefficient mu_la in (0,1).",
     )
     ap.add_argument("--presymp_lnp", type=str, default="end", choices=["none","end","each_substep"], help="LayerNorm on presymplectic attention momentum P/Pi: none|end|each_substep")
 
@@ -345,18 +685,25 @@ def main():
              "The MLP updates P in-place; updated P flows to the next layer's attention. "
              "Mutually exclusive with --presymp_mlp_use_attn_vel.",
     )
+    ap.add_argument(
+        "--presymp_mlp_mode",
+        type=str,
+        default=None,
+        choices=["attn_vel", "p_vel", "separate_vel"],
+        help="Explicit MLP coupling for presymplectic-family models. Prefer this over the legacy boolean flags in architecture comparisons.",
+    )
 
 
     # v0 initialization embeddings for momentum variants (YuriiFormer Appendix A.1)
     ap.add_argument(
         "--no_v0_init",
         action="store_true",
-        help="disable separate token/pos v0 embeddings for initializing velocity/momentum (momentum variants only)",
+        help="disable separate token/position v0 embeddings for momentum variants",
     )
     ap.add_argument(
-        "--allow_token_conditioned_v0_init",
+        "--learned_v0_init",
         action="store_true",
-        help="opt back into token-conditioned v0 initialisation. Unsafe for leak-free autoregressive evaluation and therefore disabled by default for presymplectic softmax models.",
+        help="explicitly enable the causal learned token/position v0 embedding initialization for momentum variants",
     )
 
     # YuriiFormer noise + restart (applied across depth)
@@ -365,14 +712,21 @@ def main():
     ap.add_argument("--yurii_noise_loc", type=str, default="v", choices=["dx", "v", "xin"], help="inject noise into dx, v, or lookahead xin")
     ap.add_argument("--yurii_restart", type=str, default="none", choices=["none", "speed", "loss"], help="restart criterion")
     ap.add_argument("--yurii_restart_min_layer", type=int, default=1, help="start checking restart conditions at this layer index")
+    ap.add_argument("--presymp_noise_eta", type=float, default=0.0, help="causal presymplectic momentum-noise variance scale")
+    ap.add_argument("--presymp_noise_gamma", type=float, default=0.55, help="decay exponent in eta/(1+global_step)^gamma")
 
     # Training hyperparams (paper: 10k steps, warmup 1k, peak AdamW LR 6e-4, bf16, clip 1.0)
     ap.add_argument("--max_steps", type=int, default=10_000)
+    ap.add_argument("--max_tokens", type=int, default=0, help="If positive, use the largest whole-step token budget not exceeding this cap.")
+    ap.add_argument("--global_tokens_per_step", type=int, default=0, help="If positive, derive gradient accumulation from this fixed global token batch.")
     ap.add_argument("--warmup_steps", type=int, default=1_000)
+    ap.add_argument("--warmup_ratio", type=float, default=None, help="If set, override warmup_steps by this fraction of max_steps.")
     ap.add_argument("--peak_lr", type=float, default=6e-4)
     ap.add_argument("--min_lr_ratio", type=float, default=0.1)
     ap.add_argument("--betas", type=float, nargs=2, default=(0.9, 0.95))
     ap.add_argument("--grad_clip", type=float, default=1.0)
+    ap.add_argument("--optimizer", type=str, default="muon_adamw", choices=["muon_adamw", "adamw"])
+    ap.add_argument("--muon_lr", type=float, default=0.02)
 
     # Batch / accumulation
     ap.add_argument("--batch_size", type=int, default=2, help="microbatch size (sequences) per iteration")
@@ -388,10 +742,15 @@ def main():
     ap.add_argument("--plot", action="store_true", help="save loss-vs-step plot PNG to out_dir")
     ap.add_argument("--resume", type=str, default="", help="path to checkpoint.pt")
     ap.add_argument("--device", type=str, default="cuda")
+    ap.add_argument("--amp_dtype", type=str, default="bfloat16", choices=["bfloat16", "float16"], help="CUDA autocast dtype.")
+    ap.add_argument("--eval_only", action="store_true", help="Evaluate --resume on the fixed validation batches and exit.")
+    ap.add_argument("--require_data_manifest", action=argparse.BooleanOptionalAction, default=False, help="require and validate preprocessing sidecars for both binary datasets")
 
     # Text generation / inspection
     ap.add_argument("--sample_interval", type=int, default=0,
-                    help="If >0, print a decoded text sample every this many training steps (typically at eval time).")
+                    help="If >0, print and persist a decoded text sample every this many training steps at evaluation.")
+    ap.add_argument("--sample_final", action=argparse.BooleanOptionalAction, default=False,
+                    help="Persist one final decoded example to samples.jsonl after training.")
     ap.add_argument("--sample_max_new_tokens", type=int, default=128,
                     help="Number of new tokens to generate for each sample.")
     ap.add_argument("--sample_prefix_tokens", type=int, default=64,
@@ -407,18 +766,51 @@ def main():
     ap.add_argument("--sample_eos_token_id", type=int, default=50256,
                     help="Stop generation once all batch elements emit this token. Use -1 to disable early stop.")
 
+    if config_args.config:
+        with open(config_args.config, "r", encoding="utf-8") as f:
+            config_defaults = json.load(f)
+        valid_dests = {action.dest for action in ap._actions}
+        unknown = sorted(set(config_defaults) - valid_dests)
+        if unknown:
+            raise SystemExit(f"Unknown keys in {config_args.config}: {unknown}")
+        ap.set_defaults(**config_defaults)
     args = ap.parse_args()
 
-    presymp_softmax_arches = {"presymp", "presymp_euler", "presymp_exp_euler", "presymp_ab2", "presymp_etd_ab2", "presymp_strang", "plain_euler"}
-    if args.arch in presymp_softmax_arches and not args.allow_token_conditioned_v0_init:
-        args.no_v0_init = True
-    elif args.arch in presymp_softmax_arches and args.allow_token_conditioned_v0_init:
-        warnings.warn(
-            "Token-conditioned v0 initialisation was explicitly re-enabled. This can create an autoregressive shortcut in the momentum stream; leak checks will warn at runtime if it becomes unsafe.",
-            RuntimeWarning,
-        )
+    base_tokens_per_micro = args.batch_size * args.block_size
+    if args.global_tokens_per_step > 0:
+        if args.global_tokens_per_step % base_tokens_per_micro != 0:
+            raise SystemExit("global_tokens_per_step must be divisible by batch_size*block_size")
+        args.grad_accum_steps = args.global_tokens_per_step // base_tokens_per_micro
+    tokens_per_step_config = args.batch_size * args.block_size * args.grad_accum_steps
+    if args.max_tokens > 0:
+        args.max_steps = args.max_tokens // tokens_per_step_config
+        if args.max_steps < 1:
+            raise SystemExit("max_tokens must cover at least one optimizer step")
+    if args.warmup_ratio is not None:
+        if not 0.0 <= args.warmup_ratio < 1.0:
+            raise SystemExit("warmup_ratio must lie in [0,1)")
+        args.warmup_steps = round(args.warmup_ratio * args.max_steps)
+    if not 0.0 < args.presymp_lookahead_init < 1.0:
+        raise SystemExit("presymp_lookahead_init must lie strictly between 0 and 1")
 
-    if args.arch in presymp_softmax_arches and not args.presymp_mlp_use_attn_vel and not args.presymp_mlp_use_p_vel:
+    presymp_softmax_arches = {"causal_symp_fe", "causal_symp_pe", "causal_symp_exp_pe", "causal_symp_halfdamp_pe", "causal_symp_ab2", "presymp", "presymp_euler", "presymp_exp_euler", "presymp_ab2", "presymp_etd_ab2", "presymp_strang", "plain_euler"}
+    if args.no_v0_init and args.learned_v0_init:
+        raise SystemExit("--no_v0_init and --learned_v0_init are mutually exclusive")
+    # Preserve all previous causal-SympFormer specifications: they remain at
+    # zero momentum unless learned v0 is requested explicitly.  The learned
+    # token/position stream is prefix-local and is covered by the exhaustive
+    # suffix-causality verifier.
+    if args.arch in presymp_softmax_arches and not args.learned_v0_init:
+        args.no_v0_init = True
+
+    if args.presymp_mlp_mode is not None:
+        if args.presymp_mlp_use_attn_vel or args.presymp_mlp_use_p_vel:
+            raise SystemExit("--presymp_mlp_mode is mutually exclusive with the legacy MLP velocity flags")
+        args.presymp_mlp_use_attn_vel = args.presymp_mlp_mode == "attn_vel"
+        args.presymp_mlp_use_p_vel = args.presymp_mlp_mode == "p_vel"
+    elif args.arch in presymp_softmax_arches and not args.presymp_mlp_use_attn_vel and not args.presymp_mlp_use_p_vel:
+        # Backward-compatible default. Architecture comparisons must use the
+        # explicit --presymp_mlp_mode flag so separate_vel is representable.
         args.presymp_mlp_use_attn_vel = True
 
     # Use per-run directory to avoid collisions when running multiple arch variants.
@@ -428,6 +820,7 @@ def main():
     os.makedirs(run_dir, exist_ok=True)
 
     # Seeds
+    random.seed(args.seed)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
     torch.cuda.manual_seed_all(args.seed)
@@ -437,7 +830,10 @@ def main():
     device = args.device
     if device.startswith("cuda") and not torch.cuda.is_available():
         raise SystemExit("CUDA requested but not available.")
-    amp_dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
+    if device.startswith("cuda"):
+        amp_dtype = torch.bfloat16 if args.amp_dtype == "bfloat16" else torch.float16
+    else:
+        amp_dtype = torch.float32
 
     # Load data
     train_path = os.path.join(args.data_dir, f"{args.dataset}_train.bin")
@@ -447,6 +843,8 @@ def main():
 
     train_tokens = load_bin(train_path)
     val_tokens = load_bin(val_path)
+    train_data_info = data_record(train_path, train_tokens, args.require_data_manifest)
+    val_data_info = data_record(val_path, val_tokens, args.require_data_manifest)
 
     dcfg = DataConfig(block_size=args.block_size, batch_size=args.batch_size, grad_accum_steps=args.grad_accum_steps, seed=args.seed, device=device)
     train_it = BlockEpochIterator(train_tokens, dcfg, split="train")
@@ -465,6 +863,8 @@ def main():
 
     if args.arch == "baseline":
         model = GPTModel(mcfg, no_mlp=args.no_mlp)
+    elif args.arch == "baseline_capacity":
+        model = GPTModel(mcfg, no_mlp=args.no_mlp, capacity_control=True)
     elif args.arch == "yurii_lt":
         model = YuriiFormerModel(
             mcfg,
@@ -478,7 +878,40 @@ def main():
         )
     else:
         # Presymp family: same overall architecture, different attention discretization
-        if args.arch == "presymp":
+        if args.arch in {"causal_symp_fe", "causal_symp_pe", "causal_symp_exp_pe", "causal_symp_halfdamp_pe", "causal_symp_ab2"}:
+            causal_scheme = {
+                "causal_symp_fe": "causal_fe",
+                "causal_symp_pe": "causal_pe",
+                "causal_symp_exp_pe": "causal_exp_pe",
+                "causal_symp_halfdamp_pe": "causal_halfdamp_pe",
+                "causal_symp_ab2": "causal_ab2",
+            }[args.arch]
+            model = PresympModel(
+                mcfg,
+                attn_scheme=causal_scheme,
+                h=args.presymp_h,
+                xi=args.presymp_xi,
+                t0=args.presymp_t0,
+                eta_mu=args.eta_mu,
+                eta_log_coef=args.eta_log_coef,
+                eta_lin_coef=args.eta_lin_coef,
+                eta_log_init=args.eta_log_init,
+                eta_lin_init=args.eta_lin_init,
+                eta_learnable=args.eta_learnable,
+                eta_mode=args.eta_mode,
+                eta_init=args.eta_init,
+                eta_clip=args.eta_clip,
+                use_v0_init=(not args.no_v0_init),
+                presymp_lnp=args.presymp_lnp,
+                mlp_use_attn_vel=args.presymp_mlp_use_attn_vel,
+                mlp_use_p_vel=args.presymp_mlp_use_p_vel,
+                no_mlp=args.no_mlp,
+                lookahead=args.presymp_lookahead,
+                lookahead_init=args.presymp_lookahead_init,
+                noise_eta=args.presymp_noise_eta,
+                noise_gamma=args.presymp_noise_gamma,
+            )
+        elif args.arch == "presymp":
             model = PresympModel(
                 mcfg,
                 attn_scheme="presymp",
@@ -683,6 +1116,18 @@ def main():
                 no_mlp=args.no_mlp,
                 lookahead=args.presymp_lookahead,
             )
+        elif args.arch in ("causal_riem_nag_noconn", "causal_riem_nag"):
+            model = CausalRiemannianNAGModel(
+                mcfg,
+                h=args.presymp_h,
+                t0=args.presymp_t0,
+                eta_log_coef=args.eta_log_coef if args.eta_log_coef is not None else 3.0,
+                eta_lin_coef=args.eta_lin_coef if args.eta_lin_coef is not None else 0.0,
+                eta_learnable=args.eta_learnable,
+                eta_clip=args.eta_clip,
+                include_connection=(args.arch == "causal_riem_nag"),
+                no_mlp=args.no_mlp,
+            )
         elif args.arch == "lin_baseline":
             model = LinAttnModel(
                 mcfg,
@@ -780,14 +1225,40 @@ def main():
                 use_v0_init=(not args.no_v0_init),
                 no_mlp=args.no_mlp,
             )
+        elif args.arch in ("lin_reduced_exp_mid", "lin_reduced_ab2"):
+            model = LinAttnReducedModel(
+                mcfg,
+                scheme="exp_mid" if args.arch == "lin_reduced_exp_mid" else "ab2",
+                h=args.presymp_h,
+                t0=args.presymp_t0,
+                eta_mu=args.eta_mu,
+                eta_log_coef=args.eta_log_coef,
+                eta_lin_coef=args.eta_lin_coef,
+                eta_log_init=args.eta_log_init,
+                eta_lin_init=args.eta_lin_init,
+                eta_learnable=args.eta_learnable,
+                eta_mode=args.eta_mode,
+                eta_init=args.eta_init,
+                eta_clip=args.eta_clip,
+                no_mlp=args.no_mlp,
+                noncausal=False,
+            )
         else:
             raise ValueError(f"Unknown arch: {args.arch}")
+
+    if args.learned_v0_init:
+        initialize_learned_v0_tables(model, args.seed)
+
+    if args.lin_noncausal:
+        raise ValueError(
+            "--lin_noncausal is disabled for decoder training: every linear-attention CLI route is strictly causal"
+        )
 
     model.to(device)
     # Optionally freeze learned integrator scalars (h, xi) so they stay fixed.
     if args.learn_h == 0:
         for n, p in model.named_parameters():
-            if "theta_h" in n or "theta_hX" in n or "theta_hY" in n:
+            if "theta_h" in n or "theta_hX" in n or "theta_hY" in n or "theta_tau" in n:
                 p.requires_grad_(False)
     if args.learn_xi == 0:
         for n, p in model.named_parameters():
@@ -798,18 +1269,68 @@ def main():
         #     args.presymp_xi_adapt = False
 
 
-    opt = build_optimizer(model, peak_lr=args.peak_lr, betas=tuple(args.betas), scalar_lr_mult=args.scalar_lr_mult)
+    opt = build_optimizer(
+        model,
+        peak_lr=args.peak_lr,
+        betas=tuple(args.betas),
+        scalar_lr_mult=args.scalar_lr_mult,
+        optimizer_name=args.optimizer,
+        muon_lr=args.muon_lr,
+    )
+
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    manifest = {
+        "args": vars(args),
+        "model_config": asdict(mcfg),
+        "trainable_parameters": trainable_params,
+        "tokens_per_step": tokens_per_step_config,
+        "source_revision": source_revision(),
+        "source_fingerprint": source_fingerprint(args.config),
+        "python": platform.python_version(),
+        "torch": torch.__version__,
+        "device": device,
+        "gpu": torch.cuda.get_device_name(0) if device.startswith("cuda") else None,
+        "target_max_tokens": args.max_tokens if args.max_tokens > 0 else None,
+        "actual_max_tokens": args.max_steps * tokens_per_step_config,
+        "train_data": train_data_info,
+        "val_data": val_data_info,
+    }
+    with open(os.path.join(run_dir, "run_manifest.json"), "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
 
     start_step = 0
     best_val = float("inf")
+    prior_wall_cum = 0.0
 
     if args.resume:
-        ckpt = torch.load(args.resume, map_location="cpu")
+        # Resume checkpoints are trusted local training artifacts and include
+        # Python/NumPy RNG state, which is intentionally outside the restricted
+        # weights-only unpickler. Never use --resume on an untrusted file.
+        ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
         model.load_state_dict(ckpt["model"])
-        opt.load_state_dict(ckpt["opt"])
-        start_step = ckpt.get("step", 0)
+        if not args.eval_only:
+            opt.load_state_dict(ckpt["opt"])
+        start_step = ckpt.get("next_step", ckpt.get("step", 0))
         best_val = ckpt.get("best_val", float("inf"))
+        prior_wall_cum = float(ckpt.get("wall_cum_s", 0.0))
+        if "train_iterator" in ckpt:
+            train_it.load_state_dict(ckpt["train_iterator"])
+        if "val_iterator" in ckpt:
+            val_it.load_state_dict(ckpt["val_iterator"])
+        if "rng_state" in ckpt:
+            restore_rng_state(ckpt["rng_state"])
+        else:
+            warnings.warn("Legacy checkpoint has no RNG/iterator state; exact resume is impossible.")
         print(f"Resumed from {args.resume} at step {start_step}, best_val={best_val}")
+
+    if args.eval_only:
+        if not args.resume:
+            raise SystemExit("--eval_only requires --resume")
+        val_loss = estimate_loss(model, val_it, device, args.eval_batches, amp_dtype, global_step=start_step)
+        print(json.dumps({"checkpoint": args.resume, "step": start_step, "val_loss": val_loss}, sort_keys=True))
+        if args.sample_final:
+            print_sample(model, val_tokens, device, args, global_step=start_step, run_dir=run_dir, force=True)
+        return
 
     metrics_path = os.path.join(run_dir, "metrics.csv")
     # wall_dt_s: time since previous log print (train rows)
@@ -826,7 +1347,30 @@ def main():
     # Training loop
     model.train()
     t0_wall = time.time()          # for wall_dt_s
-    t_start = time.time()          # for wall_cum_s
+    t_start = time.time() - prior_wall_cum  # preserve cumulative wall time across resume
+    def abort_nonfinite(error, lr):
+        failure_path, checkpoint_path = write_nonfinite_failure(
+            run_dir,
+            error,
+            model=model,
+            opt=opt,
+            best_val=best_val,
+            mcfg=mcfg,
+            args=args,
+            train_it=train_it,
+            val_it=val_it,
+            wall_cum_s=time.time() - t_start,
+            tokens_per_step=tokens_per_step_config,
+            lr=lr,
+        )
+        print(f"[fatal] {error}", flush=True)
+        print(f"[fatal] diagnostic={failure_path}", flush=True)
+        if checkpoint_path:
+            print(
+                f"[fatal] forensic_checkpoint={checkpoint_path} (not resumable)",
+                flush=True,
+            )
+        raise error
     for step in range(start_step, args.max_steps):
         # update learning rates
         lr = cosine_lr(step, args.warmup_steps, args.max_steps, args.peak_lr, args.min_lr_ratio)
@@ -846,16 +1390,27 @@ def main():
             with torch.autocast(device_type=device.split(':')[0], dtype=amp_dtype, enabled=(device.startswith("cuda"))):
                 _, loss = model(xb, yb, global_step=step)
                 loss = loss / args.grad_accum_steps
+            try:
+                loss_value = require_finite_scalar(
+                    loss,
+                    kind="training_loss",
+                    step=step,
+                    micro_step=micro,
+                )
+            except NonFiniteTrainingError as error:
+                abort_nonfinite(error, lr)
             loss.backward()
-            loss_accum += loss.item()
+            loss_accum += loss_value
             if hasattr(model, "last_restart_count"):
                 restarts_accum += int(getattr(model, "last_restart_count", 0))
 
-        # clip
-        if args.grad_clip > 0:
-            clip_params = [p for (n,p) in model.named_parameters() if p.requires_grad and ('theta_h' not in n and 'theta_hX' not in n and 'theta_hY' not in n and 'theta_xi_raw' not in n)]
-            torch.nn.utils.clip_grad_norm_(clip_params, args.grad_clip)
-
+        # Check the total norm even when clipping is disabled. This catches
+        # nonfinite gradients before they can contaminate model parameters.
+        clip_params = [p for p in model.parameters() if p.requires_grad]
+        try:
+            clip_grad_norm_finite(clip_params, args.grad_clip, step=step)
+        except NonFiniteTrainingError as error:
+            abort_nonfinite(error, lr)
         opt.step()
 
         toks_per_step = args.batch_size * args.block_size * args.grad_accum_steps
@@ -868,7 +1423,7 @@ def main():
             extra = ""
             if args.arch == "yurii_lt" and args.yurii_restart != "none":
                 extra = f" | restarts {restarts_accum}"
-            if (args.arch.startswith("presymp") or args.arch in ("plain_euler", "lin_presymp", "lin_exp_euler", "lin_ab2", "lin_etd_ab2")) and hasattr(model, "last_xi_mean"):
+            if (args.arch.startswith("presymp") or args.arch.startswith("causal_symp_") or args.arch in ("plain_euler", "lin_presymp", "lin_exp_euler", "lin_ab2", "lin_etd_ab2", "lin_reduced_exp_mid", "lin_reduced_ab2")) and hasattr(model, "last_xi_mean"):
                 extra += f" | hX {getattr(model, 'last_h_mean', float('nan')):.4g} | hY {getattr(model, 'last_hY_mean', float('nan')):.4g} | xi_mean {getattr(model, 'last_xi_mean', float('nan')):.3g} | rX {getattr(model, 'last_rX_max', float('nan')):.2e} | rP {getattr(model, 'last_rP_max', float('nan')):.2e} | c_log {getattr(model, 'last_c_log_mean', float('nan')):.4g} | c_lin {getattr(model, 'last_c_lin_mean', float('nan')):.4g} | leak_warn {int(getattr(model, 'last_leak_warnings', 0))}"
                 if hasattr(model, 'last_t_start') or hasattr(model, 'last_t_end'):
                     extra += f" | t_sched0 {getattr(model, 'last_t_start', float('nan')):.4g} | t_sched1 {getattr(model, 'last_t_end', float('nan')):.4g}"
@@ -902,9 +1457,17 @@ def main():
 
         if step % args.eval_interval == 0 and step > 0:
             val_loss = estimate_loss(model, val_it, device, args.eval_batches, amp_dtype, global_step=step)
+            try:
+                val_loss = require_finite_scalar(
+                    val_loss,
+                    kind="validation_loss",
+                    step=step,
+                )
+            except NonFiniteTrainingError as error:
+                abort_nonfinite(error, lr)
             print(f"[{args.arch}][eval] step {step:6d} | val_loss {val_loss:.4f}")
             if args.sample_interval > 0 and step % args.sample_interval == 0:
-                print_sample(model, val_tokens, device, args, global_step=step)
+                print_sample(model, val_tokens, device, args, global_step=step, run_dir=run_dir)
             append_csv_row(
                 metrics_path,
                 [
@@ -932,17 +1495,72 @@ def main():
             if val_loss < best_val:
                 best_val = val_loss
                 ckpt_path = os.path.join(run_dir, f"best_{args.arch}.pt")
-                torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "step": step, "best_val": best_val, "cfg": asdict(mcfg), "args": vars(args)}, ckpt_path)
+                torch.save(
+                    make_checkpoint(model, opt, step + 1, best_val, mcfg, args, train_it, val_it, wall_cum),
+                    ckpt_path,
+                )
                 print(f"  saved best checkpoint -> {ckpt_path}")
+
+    # A fixed final evaluation is mandatory even when max_steps is not aligned
+    # with eval_interval; it defines the primary paper metric.
+    final_wall_cum = time.time() - t_start
+    final_val = estimate_loss(
+        model, val_it, device, args.eval_batches, amp_dtype, global_step=args.max_steps
+    )
+    final_lr = cosine_lr(args.max_steps, args.warmup_steps, args.max_steps, args.peak_lr, args.min_lr_ratio)
+    try:
+        final_val = require_finite_scalar(
+            final_val,
+            kind="final_validation_loss",
+            step=args.max_steps,
+        )
+    except NonFiniteTrainingError as error:
+        abort_nonfinite(error, final_lr)
+    final_tokens = args.max_steps * tokens_per_step_config
+    append_csv_row(
+        metrics_path,
+        [
+            args.max_steps, "", f"{final_val:.6f}", f"{final_lr:.8e}", "",
+            f"{final_wall_cum:.6f}", str(tokens_per_step_config), str(final_tokens),
+            f"{getattr(model, 'last_h_mean', '')}", f"{getattr(model, 'last_hY_mean', '')}",
+            f"{getattr(model, 'last_xi_mean', '')}", f"{getattr(model, 'last_rX_max', '')}",
+            f"{getattr(model, 'last_rP_max', '')}", f"{getattr(model, 'last_c_log_mean', '')}",
+            f"{getattr(model, 'last_c_lin_mean', '')}", f"{getattr(model, 'last_leak_warnings', '')}",
+            f"{getattr(model, 'last_t_start', '')}", f"{getattr(model, 'last_t_end', '')}",
+        ],
+    )
+    print(f"[{args.arch}][final] step {args.max_steps:6d} | val_loss {final_val:.4f}")
+    if final_val < best_val:
+        best_val = final_val
+        best_path = os.path.join(run_dir, f"best_{args.arch}.pt")
+        torch.save(
+            make_checkpoint(model, opt, args.max_steps, best_val, mcfg, args, train_it, val_it, final_wall_cum),
+            best_path,
+        )
+        print(f"  saved best checkpoint -> {best_path}")
 
     # final checkpoint
     ckpt_path = os.path.join(run_dir, f"final_{args.arch}.pt")
-    torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "step": args.max_steps, "best_val": best_val, "cfg": asdict(mcfg), "args": vars(args)}, ckpt_path)
+    torch.save(
+        make_checkpoint(model, opt, args.max_steps, best_val, mcfg, args, train_it, val_it, final_wall_cum),
+        ckpt_path,
+    )
+    summary = {
+        "best_val": best_val,
+        "final_val": final_val,
+        "final_step": args.max_steps,
+        "tokens": args.max_steps * tokens_per_step_config,
+        "wall_cum_s": final_wall_cum,
+        "trainable_parameters": trainable_params,
+        "peak_memory_mb": (torch.cuda.max_memory_allocated() / 2**20) if device.startswith("cuda") else 0.0,
+    }
+    with open(os.path.join(run_dir, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2, sort_keys=True)
     print(f"saved final checkpoint -> {ckpt_path}")
     print(f"[{args.arch}] SUMMARY best_val={best_val:.6f} run_dir={run_dir}")
 
-    if args.sample_interval > 0:
-        print_sample(model, val_tokens, device, args, global_step=args.max_steps)
+    if args.sample_interval > 0 or args.sample_final:
+        print_sample(model, val_tokens, device, args, global_step=args.max_steps, run_dir=run_dir, force=True)
 
     if args.plot:
         plot_metrics_csv(metrics_path, plot_path, title=f"{args.arch} loss")

@@ -50,9 +50,31 @@ class BlockEpochIterator:
         max_start = len(self.tokens) - (self.T + 1)
         starts = starts[starts <= max_start]
         self.rng.shuffle(starts)
+        if len(starts) < self.cfg.batch_size:
+            raise ValueError(
+                f"Split has only {len(starts)} complete blocks after offset, "
+                f"fewer than batch_size={self.cfg.batch_size}"
+            )
         self._starts = starts
         self._pos = 0
         self.epoch += 1
+
+    def state_dict(self):
+        """Return all state needed to resume the exact batch sequence."""
+        return {
+            "rng_state": self.rng.bit_generator.state,
+            "epoch": int(self.epoch),
+            "starts": self._starts.copy(),
+            "pos": int(self._pos),
+        }
+
+    def load_state_dict(self, state):
+        self.rng.bit_generator.state = state["rng_state"]
+        self.epoch = int(state["epoch"])
+        self._starts = np.asarray(state["starts"], dtype=np.int64).copy()
+        self._pos = int(state["pos"])
+        if not 0 <= self._pos <= len(self._starts):
+            raise ValueError("Invalid iterator position in checkpoint")
 
     def __iter__(self) -> "BlockEpochIterator":
         return self
@@ -76,6 +98,5 @@ class BlockEpochIterator:
 
 
 def load_bin(path: str) -> np.ndarray:
-    # uint16 tokens as in nanoGPT
-    arr = np.memmap(path, dtype=np.uint16, mode="r")
-    return np.array(arr, dtype=np.uint16)
+    """Memory-map uint16 tokens so OpenWebText is not copied into host RAM."""
+    return np.memmap(path, dtype=np.uint16, mode="r")

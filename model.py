@@ -44,6 +44,18 @@ def causal_mask(T: int, device: torch.device) -> torch.Tensor:
     return torch.triu(torch.ones(T, T, dtype=torch.bool, device=device), diagonal=1)
 
 
+def variable_step_ab2(current: torch.Tensor, previous: torch.Tensor, h_current, h_previous):
+    """AB2 derivative combination for adjacent, possibly unequal steps.
+
+    If r=h_current/h_previous, integration over the current interval uses
+    (1+r/2) f_n - (r/2) f_{n-1}.  This reduces to 3/2,-1/2 when r=1.
+    """
+    ratio = h_current / torch.as_tensor(
+        h_previous, device=current.device, dtype=current.dtype
+    ).clamp_min(torch.finfo(current.dtype).eps)
+    return (1.0 + 0.5 * ratio) * current - 0.5 * ratio * previous
+
+
 def _warn_once(module: nn.Module, key: str, message: str) -> None:
     cache = getattr(module, '_leak_warning_keys', None)
     if cache is None:
@@ -139,6 +151,26 @@ class GPTBlock(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.ln_1(x))
+        if not self.no_mlp:
+            x = x + self.mlp(self.ln_2(x))
+        return x
+
+
+class CapacityControlGPTBlock(GPTBlock):
+    """GPT block with one zero-initialized C-by-C residual adapter.
+
+    This matches the dominant extra per-layer parameter matrix in the causal
+    presymplectic model while preserving the baseline function at
+    initialization. It is a capacity control, not a headline method.
+    """
+
+    def __init__(self, cfg: ModelConfig, no_mlp: bool = False):
+        super().__init__(cfg, no_mlp=no_mlp)
+        self.capacity_adapter = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.ln_1(x)
+        x = x + self.attn(h) + self.capacity_adapter(h)
         if not self.no_mlp:
             x = x + self.mlp(self.ln_2(x))
         return x
@@ -429,6 +461,41 @@ class EtaSchedule(nn.Module):
             else:  # loglin
                 d = tt0_c * torch.log(tt1 / tt0) + tt1_c * dt
         return torch.clamp(d, -self.eta_clip, self.eta_clip)
+
+    def damping_integral_tensor(self, t: float, dt: torch.Tensor, device, dtype) -> torch.Tensor:
+        """Compute the exact variation-of-constants weight ``I_k`` numerically.
+
+        ``I_k = integral_t^{t+dt} exp(-(eta(t+dt)-eta(s))) ds``.
+        Eight-point Gauss--Legendre quadrature is differentiable with respect
+        to the live step and damping coefficients and is effectively exact for
+        the small layer steps used here. Closed-form log/linear cases are
+        independently checked by ``verify_linear_v3_discretizations.py``.
+        """
+        nodes = torch.tensor(
+            [-0.9602898564975363, -0.7966664774136267, -0.5255324099163290,
+             -0.1834346424956498,  0.1834346424956498,  0.5255324099163290,
+              0.7966664774136267,  0.9602898564975363],
+            device=device, dtype=dtype,
+        )
+        weights = torch.tensor(
+            [0.1012285362903763, 0.2223810344533745, 0.3137066458778873,
+             0.3626837833783620, 0.3626837833783620, 0.3137066458778873,
+             0.2223810344533745, 0.1012285362903763],
+            device=device, dtype=dtype,
+        )
+        u = 0.5 * (nodes + 1.0)
+        tt0 = torch.tensor(t, device=device, dtype=dtype)
+        tt1 = tt0 + dt
+        ss = tt0 + u * dt
+        if self.learnable:
+            c_log = self.c_log().to(device=device, dtype=dtype) if self.c_log is not None else torch.zeros((), device=device, dtype=dtype)
+            c_lin = self.c_lin().to(device=device, dtype=dtype) if self.c_lin is not None else torch.zeros((), device=device, dtype=dtype)
+        else:
+            c_log = torch.tensor(self.c_log_const, device=device, dtype=dtype)
+            c_lin = torch.tensor(self.c_lin_const, device=device, dtype=dtype)
+        remaining_eta = c_log * torch.log(tt1 / ss) + c_lin * (tt1 - ss)
+        remaining_eta = torch.clamp(remaining_eta, -self.eta_clip, self.eta_clip)
+        return 0.5 * dt * torch.sum(weights * torch.exp(-remaining_eta))
 
 def _get_eta_coefs(sched):
     """Return (c_log, c_lin) as Python floats from an EtaSchedule instance."""
@@ -780,7 +847,7 @@ class PresymplecticSoftmaxAttention(nn.Module):
 
 
 class DampedEulerAttention(nn.Module):
-    """
+    r"""
     Explicit Euler discretization of the damped finite-dimensional system.
 
     We integrate
@@ -811,6 +878,7 @@ class DampedEulerAttention(nn.Module):
         causal: bool = True,
         presymp_lnp: str = "end",
         lookahead: bool = False,
+        lookahead_init: float = 0.001,
     ):
         super().__init__()
         self.cfg = cfg
@@ -840,7 +908,7 @@ class DampedEulerAttention(nn.Module):
         # c_B: freely learned F oracle (identity init). _get_B() used only by HalfDampStrang.
         self.c_B = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
         nn.init.eye_(self.c_B.weight)
-        self.mu_la = ConstrainedScalar(0.001, "unit")
+        self.mu_la = ConstrainedScalar(lookahead_init, "unit")
         self.attn_drop = nn.Dropout(cfg.dropout)
         self.resid_drop = nn.Dropout(cfg.dropout)
 
@@ -1325,6 +1393,7 @@ class PresympGPTBlock(nn.Module):
         no_mlp: bool = False,
         attn_scheme: str = "presymp",
         lookahead: bool = False,
+        lookahead_init: float = 0.001,
         h: float = 1.0,
         xi: float = 1.0,
         t0: float = 1.0,
@@ -1358,7 +1427,49 @@ class PresympGPTBlock(nn.Module):
         self.no_mlp = bool(no_mlp)
         self.lookahead = bool(lookahead)
         attn_scheme = str(attn_scheme)
-        if attn_scheme == "presymp":
+        if attn_scheme == "causal_fe":
+            self.attn = CausalPrefixForwardEulerAttention(
+                cfg,
+                h=h,
+                t0=t0,
+                eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+                eta_mode=eta_mode,
+                eta_init=eta_init,
+                eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
+                lookahead_init=lookahead_init,
+            )
+        elif attn_scheme in {"causal_pe", "causal_exp_pe", "causal_halfdamp_pe", "causal_ab2"}:
+            causal_cls = {
+                "causal_pe": CausalPrefixPresymplecticEulerAttention,
+                "causal_exp_pe": CausalPrefixExponentialPresymplecticEulerAttention,
+                "causal_halfdamp_pe": CausalPrefixHalfDampPresymplecticEulerAttention,
+                "causal_ab2": CausalPrefixPresymplecticEulerAttention,
+            }[attn_scheme]
+            self.attn = causal_cls(
+                cfg,
+                h=h,
+                t0=t0,
+                eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init,
+                eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable,
+                eta_mode=eta_mode,
+                eta_init=eta_init,
+                eta_clip=eta_clip,
+                presymp_lnp=presymp_lnp,
+                lookahead=lookahead,
+                lookahead_init=lookahead_init,
+            )
+        elif attn_scheme == "presymp":
             self.attn = TheoryPresymplecticSoftmaxAttention(
                 cfg,
                 h=h,
@@ -1457,7 +1568,7 @@ class PresympGPTBlock(nn.Module):
                 lookahead=lookahead,
             )
         else:
-            raise ValueError("attn_scheme must be one of {'presymp','euler','exp_euler','strang','plain_euler'}")
+            raise ValueError("attn_scheme must be one of {'causal_fe','causal_pe','causal_exp_pe','causal_halfdamp_pe','causal_ab2','presymp','euler','exp_euler','strang','plain_euler'}")
 
         # MLP substep (accelerated)
         self.ln_x_mlp = LayerNorm(cfg.n_embd, bias=cfg.bias)
@@ -1709,6 +1820,8 @@ class PresympModelAB2(nn.Module):
 
         dx_prev = None
         dp_prev = None
+        hX_prev = None
+        hY_prev = None
         t_cur = float(self.attn[0].sched.t0)
         self.last_t_start = t_cur
 
@@ -1722,8 +1835,8 @@ class PresympModelAB2(nn.Module):
             if k == 0 or dx_prev is None:
                 dx_eff, dp_eff = dx_k, dp_k
             else:
-                dx_eff = 1.5 * dx_k - 0.5 * dx_prev
-                dp_eff = 1.5 * dp_k - 0.5 * dp_prev
+                dx_eff = variable_step_ab2(dx_k, dx_prev, hX_k, hX_prev)
+                dp_eff = variable_step_ab2(dp_k, dp_prev, hY_k, hY_prev)
 
             x_new = x + hX_k * dx_eff
             p_new = p + hY_k * dp_eff
@@ -1733,6 +1846,7 @@ class PresympModelAB2(nn.Module):
             v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
             x, p = x_new, p_new
             dx_prev, dp_prev = dx_k, dp_k
+            hX_prev, hY_prev = hX_k.detach(), hY_k.detach()
             t_cur += hX_k_f
 
             if self.mlp_use_p_vel:
@@ -1788,6 +1902,7 @@ class PresympModelETDAB2(PresympModelAB2):
             v = torch.zeros_like(x)
 
         H_prev = None
+        hY_prev = None
         t_cur = float(self.attn[0].sched.t0)
         self.last_t_start = t_cur
 
@@ -1807,7 +1922,7 @@ class PresympModelETDAB2(PresympModelAB2):
             if k == 0 or H_prev is None:
                 H_eff = H_k
             else:
-                H_eff = 1.5 * H_k - 0.5 * H_prev
+                H_eff = variable_step_ab2(H_k, H_prev, hY_k, hY_prev)
 
             Pi_new = Pi + hY_k * H_eff         # momentum update uses hY
             p_new = Pi_new / Lam_k1
@@ -1819,6 +1934,7 @@ class PresympModelETDAB2(PresympModelAB2):
             v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
             x, p = x_new, p_new
             H_prev = H_k
+            hY_prev = hY_k.detach()
             t_cur += hX_k_f
 
             if self.mlp_use_p_vel:
@@ -2030,6 +2146,160 @@ class TheoryPlainEulerAttention(TheoryDampedEulerAttention):
             Pk1 = self._apply_lnp(Pk1)
         self.last_h = hX_f
         self.last_hY = hY_t.detach().item()
+        return Xk1, Pk1
+
+
+class CausalPrefixPresymplecticEulerAttention(DampedEulerAttention):
+    """Strictly causal, row-local kick--damp presymplectic-Euler attention.
+
+    This is the headline decoder attention path.  It deliberately does not
+    differentiate a global masked Hamiltonian: that derivative contains
+    key-side contributions from later query rows and is therefore noncausal.
+    Instead, every output row is constructed only from its own prefix.
+    Consequently this class is geometry-inspired rather than an exact
+    Hamiltonian discretization of the noncausal particle system.
+    """
+
+    def _prefix_oracle(self, X: torch.Tensor, P: torch.Tensor):
+        x_ln = self.ln(self._la_input(X, P))
+        q, k, v = self._qkv(x_ln)
+        E, _ = self._kernel_E_z(q, k)
+        Bsz, T, C = X.shape
+        counts = torch.arange(1, T + 1, device=X.device, dtype=X.dtype).view(1, T)
+        z = (E.sum(dim=-1) / counts).clamp_min(self.eps)
+
+        BP = self.c_B(P)
+        Fv = BP / z.unsqueeze(-1)
+        kinetic = (BP * P).sum(dim=-1)
+        scaled = kinetic / (z * z + self.eps)
+        pair_weight = E * (scaled.unsqueeze(-1) + scaled.unsqueeze(-2) + 2.0)
+        v_merge = v.transpose(1, 2).contiguous().view(Bsz, T, C)
+        core = torch.matmul(pair_weight, v_merge) / (2.0 * counts.unsqueeze(-1))
+        Gv = self.resid_drop(self.c_proj(core))
+        return Fv, Gv, z
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, tk: float):
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX(device=device, dtype=dtype)
+        hY_t = self.hY(device=device, dtype=dtype)
+        _F_old, Gv, z = self._prefix_oracle(Xk, Pk)
+
+        # Exact damping followed by a conservative kick.  The same prefix
+        # kernel is reused for the position drift when lookahead is disabled.
+        d_eta = self.sched.delta_eta_tensor(tk, hY_t, device, dtype)
+        sigma = torch.exp(-d_eta)
+        Pk1_raw = sigma * (Pk + hY_t * Gv)
+        # Reuse the lookahead kernel normalization so active lookahead remains
+        # a one-prefix-oracle discretization.
+        F_new = self.c_B(Pk1_raw) / z.unsqueeze(-1)
+        Xk1 = Xk + hX_t * F_new
+
+        Pk1 = Pk1_raw
+        if self.presymp_lnp != "none":
+            Pk1 = self._apply_lnp(Pk1)
+        self.last_h = hX_t.detach().item()
+        self.last_hY = hY_t.detach().item()
+        self.last_xi = 0.0
+        return Xk1, Pk1
+
+
+class CausalPrefixExponentialPresymplecticEulerAttention(CausalPrefixPresymplecticEulerAttention):
+    """One-oracle integrating-factor kick--drift causal PE.
+
+    With ``a = eta(t+h)-eta(t)`` and ``sigma=exp(-a)``, frozen force is
+    integrated with ``w = h*phi_1(-a) = h*(1-exp(-a))/a`` rather than the
+    incumbent split weight ``sigma*h``.  The updated momentum is then used in
+    the position drift, retaining the kick--drift ordering.
+    """
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, tk: float):
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX(device=device, dtype=dtype)
+        hY_t = self.hY(device=device, dtype=dtype)
+        _F_old, Gv, z = self._prefix_oracle(Xk, Pk)
+
+        d_eta = self.sched.delta_eta_tensor(tk, hY_t, device, dtype)
+        sigma = torch.exp(-d_eta)
+        # Stable phi_1(-a). d_eta is nonnegative for the supported schedules;
+        # the series branch protects the zero-damping limit and its gradient.
+        small = d_eta.abs() < 1e-4
+        safe = torch.where(small, torch.ones_like(d_eta), d_eta)
+        phi1 = -torch.expm1(-d_eta) / safe
+        phi1_series = 1.0 - 0.5 * d_eta + (d_eta * d_eta) / 6.0
+        phi1 = torch.where(small, phi1_series, phi1)
+        Pk1_raw = sigma * Pk + hY_t * phi1 * Gv
+        F_new = self.c_B(Pk1_raw) / z.unsqueeze(-1)
+        Xk1 = Xk + hX_t * F_new
+
+        Pk1 = self._apply_lnp(Pk1_raw) if self.presymp_lnp != "none" else Pk1_raw
+        self.last_h = hX_t.detach().item()
+        self.last_hY = hY_t.detach().item()
+        self.last_xi = 0.0
+        return Xk1, Pk1
+
+
+class CausalPrefixHalfDampPresymplecticEulerAttention(CausalPrefixPresymplecticEulerAttention):
+    """Half-damp--kick--drift--half-damp causal PE with one oracle call.
+
+    The damping map is split symmetrically around the first-order conservative
+    kick--drift map.  For frozen force, its force weight ``sqrt(sigma)*h``
+    approximates the exact integrating-factor weight with relative error
+    ``O(d_eta**2)``, while preserving the exact total damping ``sigma``.
+    """
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, tk: float):
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX(device=device, dtype=dtype)
+        hY_t = self.hY(device=device, dtype=dtype)
+        d_eta = self.sched.delta_eta_tensor(tk, hY_t, device, dtype)
+        rho = torch.exp(-0.5 * d_eta)
+
+        P_half = rho * Pk
+        _F_half, Gv, z = self._prefix_oracle(Xk, P_half)
+        P_kick = P_half + hY_t * Gv
+        F_new = self.c_B(P_kick) / z.unsqueeze(-1)
+        Xk1 = Xk + hX_t * F_new
+        Pk1_raw = rho * P_kick
+
+        Pk1 = self._apply_lnp(Pk1_raw) if self.presymp_lnp != "none" else Pk1_raw
+        self.last_h = hX_t.detach().item()
+        self.last_hY = hY_t.detach().item()
+        self.last_xi = 0.0
+        return Xk1, Pk1
+
+
+class CausalPrefixForwardEulerAttention(CausalPrefixPresymplecticEulerAttention):
+    """Strictly causal simultaneous-forward-Euler drift on the prefix oracle.
+
+    This path shares the oracle, exact damping, learned step sizes, momentum
+    normalization, and surrounding MLP update with
+    :class:`CausalPrefixPresymplecticEulerAttention`. The sole discretization
+    change is that the position drift uses the old momentum:
+
+        X_{k+1} = X_k + h_X F(X_k, P_k),
+
+    while the presymplectic-Euler path uses ``P_{k+1}``. Keeping every other
+    operation identical makes the two causal draft discretizations suitable
+    for a controlled comparison.
+    """
+
+    def step(self, Xk: torch.Tensor, Pk: torch.Tensor, tk: float):
+        device, dtype = Xk.device, Xk.dtype
+        hX_t = self.hX(device=device, dtype=dtype)
+        hY_t = self.hY(device=device, dtype=dtype)
+        F_old, Gv, _z = self._prefix_oracle(Xk, Pk)
+
+        d_eta = self.sched.delta_eta_tensor(tk, hY_t, device, dtype)
+        sigma = torch.exp(-d_eta)
+        Pk1_raw = sigma * (Pk + hY_t * Gv)
+        Xk1 = Xk + hX_t * F_old
+
+        Pk1 = Pk1_raw
+        if self.presymp_lnp != "none":
+            Pk1 = self._apply_lnp(Pk1)
+        self.last_h = hX_t.detach().item()
+        self.last_hY = hY_t.detach().item()
+        self.last_xi = 0.0
         return Xk1, Pk1
 
 
@@ -2473,6 +2743,7 @@ class LinAttnAB2Model(nn.Module):
         v = torch.zeros_like(x)   # MLP velocity stream
 
         dX_prev = None; dY_prev = None
+        hX_prev = None; hY_prev = None
         t_cur = float(self.attn[0].sched.t0)
         self.last_t_start = t_cur
         for k in range(self.cfg.n_layer):
@@ -2492,8 +2763,8 @@ class LinAttnAB2Model(nn.Module):
             if k == 0 or dX_prev is None:
                 dX_eff, dY_eff = dX_k, dY_k
             else:
-                dX_eff = 1.5 * dX_k - 0.5 * dX_prev
-                dY_eff = 1.5 * dY_k - 0.5 * dY_prev
+                dX_eff = variable_step_ab2(dX_k, dX_prev, hX_k, hX_prev)
+                dY_eff = variable_step_ab2(dY_k, dY_prev, hY_k, hY_prev)
 
             x_new = x + hX_k * dX_eff
             y_new = y + hY_k * dY_eff
@@ -2503,6 +2774,7 @@ class LinAttnAB2Model(nn.Module):
             v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
             x, y = x_new, y_new
             dX_prev, dY_prev = dX_k, dY_k
+            hX_prev, hY_prev = hX_k.detach(), hY_k.detach()
             a.last_h = hX_f
             t_cur += hX_f
 
@@ -2620,6 +2892,7 @@ class LinAttnETDAB2Model(nn.Module):
         v = torch.zeros_like(x)   # MLP velocity stream
 
         H_prev = None
+        hY_prev = None
         t_cur = float(self.attn[0].sched.t0)
         self.last_t_start = t_cur
         for k in range(self.cfg.n_layer):
@@ -2637,7 +2910,7 @@ class LinAttnETDAB2Model(nn.Module):
             _F_old, G_k = _lin_FG(Xn, y, A, V_mat, a.causal)
 
             H_k = Lam_k * G_k
-            H_eff = H_k if (k == 0 or H_prev is None) else (1.5 * H_k - 0.5 * H_prev)
+            H_eff = H_k if (k == 0 or H_prev is None) else variable_step_ab2(H_k, H_prev, hY_k, hY_prev)
 
             Pi_new = Lam_k * y + hY_k * H_eff      # integrating-factor momentum update
             y_new  = Pi_new / Lam_k1
@@ -2653,6 +2926,7 @@ class LinAttnETDAB2Model(nn.Module):
             v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
             x, y = x_new, y_new
             H_prev = H_k
+            hY_prev = hY_k.detach()
             a.last_h = hX_f
             t_cur += hX_f
 
@@ -2677,16 +2951,447 @@ class LinAttnETDAB2Model(nn.Module):
         return logits, loss
 
 
-class GPTModel(nn.Module):
-    def __init__(self, cfg: ModelConfig, no_mlp: bool = False):
+def _symmetric_matrix(weight: torch.Tensor) -> torch.Tensor:
+    """Return the symmetric part used by the v3 reduced linear theory path."""
+    return 0.5 * (weight + weight.transpose(-1, -2))
+
+
+class ReducedLinearAttentionLayer(nn.Module):
+    """One global reduced-state linear-attention layer from arXiv v3.
+
+    The matrix momentum ``P`` is shared by all particles in one sequence. This
+    is the exact closure only for the global unmasked particle system. The
+    pre-norm residual wrapper below is a practical approximation.
+    """
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        h: float = 0.1,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        causal: bool = True,
+    ):
         super().__init__()
+        self.causal = bool(causal)
+        self.c_A = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        self.c_V = nn.Linear(cfg.n_embd, cfg.n_embd, bias=False)
+        self.ln = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.resid_drop = nn.Dropout(cfg.dropout)
+        self.theta_h = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.sched = EtaSchedule(
+            t0=t0, mu=eta_mu, log_coef=eta_log_coef, lin_coef=eta_lin_coef,
+            learnable=eta_learnable, mode=eta_mode, init=eta_init,
+            init_log=eta_log_init, init_lin=eta_lin_init, eta_clip=eta_clip,
+        )
+        self.last_h = float(h)
+        self.last_hY = float(h)
+
+    def h(self, device=None, dtype=None):
+        value = F.softplus(self.theta_h)
+        if device is not None or dtype is not None:
+            value = value.to(
+                device=device if device is not None else value.device,
+                dtype=dtype if dtype is not None else value.dtype,
+            )
+        return value
+
+    def matrices(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        return _symmetric_matrix(self.c_A.weight), _symmetric_matrix(self.c_V.weight)
+
+    def _moments(self, Xn: torch.Tensor) -> torch.Tensor:
+        """Global moment or strictly causal prefix moments, scaled by full T."""
+        outer = Xn.unsqueeze(-1) * Xn.unsqueeze(-2)
+        if self.causal:
+            return outer.cumsum(dim=1) / float(Xn.shape[1])
+        return outer.sum(dim=1) / float(Xn.shape[1])
+
+    @staticmethod
+    def _row_drift(Xn: torch.Tensor, A: torch.Tensor, S: torch.Tensor, P: torch.Tensor) -> torch.Tensor:
+        value = Xn @ A
+        if S.ndim == 4:
+            value = torch.matmul(value.unsqueeze(-2), S).squeeze(-2)
+            return torch.matmul(value.unsqueeze(-2), P).squeeze(-2)
+        return torch.matmul(torch.matmul(value, S), P)
+
+    def rhs(
+        self, X: torch.Tensor, P: torch.Tensor, tk: float
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return ``(dX,dP,S,A,V)`` for global or prefix-local reduced dynamics."""
+        Xn = self.ln(X)
+        S = self._moments(Xn)
+        A, V = self.matrices()
+        P2 = torch.matmul(P, P)
+        dX = self._row_drift(Xn, A, S, P)
+        dP = -self.sched.alpha(tk, X.device, X.dtype) * P - A @ S @ P2 - P2 @ S @ A + V
+        return self.resid_drop(dX), dP, S, A, V
+
+    def exp_mid_step(self, X: torch.Tensor, P: torch.Tensor, tk: float) -> Tuple[torch.Tensor, torch.Tensor]:
+        h = self.h(device=X.device, dtype=X.dtype)
+        Xn = self.ln(X)
+        S = self._moments(Xn)
+        A, V = self.matrices()
+        P2 = torch.matmul(P, P)
+        conservative = -A @ S @ P2 - P2 @ S @ A + V
+        d_eta = self.sched.delta_eta_tensor(tk, h, X.device, X.dtype)
+        sigma = torch.exp(-d_eta)
+        I_k = self.sched.damping_integral_tensor(tk, h, X.device, X.dtype)
+        P_new = sigma * P + I_k * conservative
+        P_new = 0.5 * (P_new + P_new.transpose(-1, -2))
+        P_bar = 0.5 * (P + P_new)
+        dX = self._row_drift(Xn, A, S, P_bar)
+        X_new = X + h * self.resid_drop(dX)
+        self.last_h = h.detach().item()
+        self.last_hY = self.last_h
+        return X_new, P_new
+
+
+class LinAttnReducedModel(nn.Module):
+    """Practical wrapper for the v3 reduced matrix-momentum discretizations."""
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        *,
+        scheme: str,
+        h: float = 0.1,
+        t0: float = 1.0,
+        eta_mu: Optional[float] = None,
+        eta_log_coef: Optional[float] = None,
+        eta_lin_coef: Optional[float] = None,
+        eta_log_init: Optional[float] = None,
+        eta_lin_init: Optional[float] = None,
+        eta_learnable: bool = False,
+        eta_mode: str = "log",
+        eta_init: Optional[float] = None,
+        eta_clip: float = 50.0,
+        no_mlp: bool = False,
+        noncausal: bool = False,
+    ):
+        super().__init__()
+        if scheme not in ("exp_mid", "ab2"):
+            raise ValueError("reduced linear scheme must be 'exp_mid' or 'ab2'")
         self.cfg = cfg
+        self.scheme = scheme
+        self.causal = not bool(noncausal)
         self.no_mlp = bool(no_mlp)
         self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
         self.drop = nn.Dropout(cfg.dropout)
+        self.attn = nn.ModuleList([
+            ReducedLinearAttentionLayer(
+                cfg, h=h, t0=t0, eta_mu=eta_mu,
+                eta_log_coef=eta_log_coef, eta_lin_coef=eta_lin_coef,
+                eta_log_init=eta_log_init, eta_lin_init=eta_lin_init,
+                eta_learnable=eta_learnable, eta_mode=eta_mode,
+                eta_init=eta_init, eta_clip=eta_clip, causal=self.causal,
+            )
+            for _ in range(cfg.n_layer)
+        ])
+        if not self.no_mlp:
+            self.mlp_steps = nn.ModuleList([PresympMLPSubstep(cfg) for _ in range(cfg.n_layer)])
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+        self.last_rX_max = 0.0
+        self.last_rP_max = 0.0
+        self.last_xi_mean = float("nan")
+        self.last_c_log_mean = float("nan")
+        self.last_c_lin_mean = float("nan")
+        self.last_leak_warnings = 0
+        self.apply(self._init_weights)
 
-        self.blocks = nn.ModuleList([GPTBlock(cfg, no_mlp=self.no_mlp) for _ in range(cfg.n_layer)])
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, std=0.02)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, std=0.02)
+
+    @property
+    def last_h_mean(self):
+        return sum(layer.last_h for layer in self.attn) / len(self.attn)
+
+    @property
+    def last_hY_mean(self):
+        return sum(layer.last_hY for layer in self.attn) / len(self.attn)
+
+    def forward(self, idx, targets=None, global_step=None):
+        B, T = idx.shape
+        if T > self.cfg.block_size:
+            raise ValueError("sequence exceeds configured block size")
+        pos = torch.arange(T, device=idx.device)
+        X = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None])
+        if self.causal:
+            P = torch.zeros(B, T, self.cfg.n_embd, self.cfg.n_embd, device=X.device, dtype=X.dtype)
+        else:
+            P = torch.zeros(B, self.cfg.n_embd, self.cfg.n_embd, device=X.device, dtype=X.dtype)
+        v = torch.zeros_like(X)
+        previous_dX = previous_dP = previous_h = None
+        t_cur = float(self.attn[0].sched.t0)
+        self.last_t_start = t_cur
+
+        for k, layer in enumerate(self.attn):
+            h = layer.h(device=X.device, dtype=X.dtype)
+            h_float = h.detach().item()
+            X_old = X
+            if self.scheme == "exp_mid":
+                X, P = layer.exp_mid_step(X, P, t_cur)
+            else:
+                dX, dP, _S, _A, _V = layer.rhs(X, P, t_cur)
+                if previous_dX is None:
+                    effective_dX, effective_dP = dX, dP
+                else:
+                    effective_dX = variable_step_ab2(dX, previous_dX, h, previous_h)
+                    effective_dP = variable_step_ab2(dP, previous_dP, h, previous_h)
+                X = X + h * effective_dX
+                P = P + h * effective_dP
+                P = 0.5 * (P + P.transpose(-1, -2))
+                previous_dX, previous_dP, previous_h = dX, dP, h.detach()
+                layer.last_h = h_float
+                layer.last_hY = h_float
+
+            v_attn = (X - X_old) / h.clamp_min(1e-8)
+            if not self.no_mlp:
+                X, v = self.mlp_steps[k](X, v, v_attn=v_attn)
+            t_cur += h_float
+
+        self.last_t_end = t_cur
+        coefficients = [_get_eta_coefs(layer.sched) for layer in self.attn]
+        self.last_c_log_mean = sum(item[0] for item in coefficients) / len(coefficients)
+        self.last_c_lin_mean = sum(item[1] for item in coefficients) / len(coefficients)
+        X = self.ln_f(X)
+        logits = self.lm_head(X)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+def _spd_from_raw(raw: torch.Tensor, eps: float = 1e-4) -> torch.Tensor:
+    """Differentiable Cholesky parameterization of a symmetric PD matrix."""
+    lower = torch.tril(raw, diagonal=-1)
+    diagonal = F.softplus(torch.diagonal(raw, dim1=-2, dim2=-1)) + eps
+    factor = lower + torch.diag_embed(diagonal)
+    return factor @ factor.transpose(-1, -2)
+
+
+class CausalRiemannianNAGLayer(nn.Module):
+    """Causal row-local Riemannian Nesterov approximation.
+
+    The exact finite-particle metric is global and unmasked.  This layer keeps
+    only the prefix-local diagonal metric block, which preserves suffix
+    causality but is deliberately labelled a geometry-inspired approximation.
+    """
+
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        *,
+        h: float = 0.1,
+        t0: float = 1.0,
+        eta_log_coef: float = 3.0,
+        eta_lin_coef: float = 0.0,
+        eta_learnable: bool = False,
+        eta_clip: float = 50.0,
+        include_connection: bool = True,
+        no_mlp: bool = False,
+    ):
+        super().__init__()
+        self.include_connection = bool(include_connection)
+        self.no_mlp = bool(no_mlp)
+        self.scale = 1.0 / math.sqrt(cfg.n_embd)
+        self.eps = 1e-8
+        init_diag = inv_softplus(1.0 - 1e-4)
+        self.raw_A = nn.Parameter(torch.eye(cfg.n_embd) * init_diag)
+        self.raw_B = nn.Parameter(torch.eye(cfg.n_embd) * init_diag)
+        self.theta_tau = nn.Parameter(torch.tensor(inv_softplus(h), dtype=torch.float32))
+        self.sched = EtaSchedule(
+            t0=t0, log_coef=eta_log_coef, lin_coef=eta_lin_coef,
+            learnable=eta_learnable, mode="loglin", eta_clip=eta_clip,
+        )
+        self.ln1 = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.resid_drop = nn.Dropout(cfg.dropout)
+        if not self.no_mlp:
+            self.ln2 = LayerNorm(cfg.n_embd, bias=cfg.bias)
+            self.mlp = MLP(cfg)
+        self.last_h = float(h)
+        self.last_beta = float("nan")
+
+    def tau(self, device=None, dtype=None):
+        value = F.softplus(self.theta_tau)
+        if device is not None or dtype is not None:
+            value = value.to(
+                device=device if device is not None else value.device,
+                dtype=dtype if dtype is not None else value.dtype,
+            )
+        return value
+
+    def matrices(self) -> Tuple[torch.Tensor, torch.Tensor]:
+        return _spd_from_raw(self.raw_A), _spd_from_raw(self.raw_B)
+
+    def _grad_log_partition(
+        self, Q: torch.Tensor, weights: torch.Tensor, QA: torch.Tensor
+    ) -> torch.Tensor:
+        """Analytic prefix derivative of log z_i, chained through LayerNorm."""
+        grad_normalized = (weights @ QA) * self.scale
+        diagonal_weight = torch.diagonal(weights, dim1=-2, dim2=-1).unsqueeze(-1)
+        grad_normalized = grad_normalized + diagonal_weight * QA * self.scale
+        centered = Q - Q.mean(dim=-1, keepdim=True)
+        inv_std = torch.rsqrt(centered.square().mean(dim=-1, keepdim=True) + 1e-5)
+        normalized = centered * inv_std
+        cotangent = grad_normalized * self.ln1.weight
+        return inv_std * (
+            cotangent
+            - cotangent.mean(dim=-1, keepdim=True)
+            - normalized * (cotangent * normalized).mean(dim=-1, keepdim=True)
+        )
+
+    def _causal_oracle(self, Q: torch.Tensor, velocity: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        Qn = self.ln1(Q)
+        A, Bmat = self.matrices()
+        QA = Qn @ A
+        scores = (QA @ Qn.transpose(-1, -2)) * self.scale
+        T = Q.shape[1]
+        mask = causal_mask(T, Q.device)
+        scores = scores.masked_fill(mask.unsqueeze(0), float("-inf"))
+        weights = torch.softmax(scores.float(), dim=-1).to(dtype=Q.dtype)
+
+        # Since V^T=A B under B=V A^{-1}, this is the causalized
+        # negative Riemannian gradient direction from the global theory.
+        values = QA @ Bmat
+        attention = self.resid_drop(weights @ values)
+
+        if not self.include_connection:
+            return attention, torch.zeros_like(attention)
+
+        # Prefix-only derivative of log z_i with respect to its query row,
+        # including the second contribution of the diagonal score x_i^T A x_i.
+        grad_log_z = self._grad_log_partition(Q, weights, QA)
+
+        # Local conformal connection:
+        # Gamma(u,u)=(u^T a)u - 1/2(u^T B^{-1}u)Ba.
+        solved = torch.linalg.solve(Bmat.float(), velocity.float().transpose(-1, -2)).transpose(-1, -2)
+        solved = solved.to(dtype=velocity.dtype)
+        ua = (velocity * grad_log_z).sum(dim=-1, keepdim=True)
+        quad = (velocity * solved).sum(dim=-1, keepdim=True)
+        B_a = grad_log_z @ Bmat
+        gamma = ua * velocity - 0.5 * quad * B_a
+        return attention, gamma
+
+    def step(self, X: torch.Tensor, X_prev: torch.Tensor, tk: float) -> torch.Tensor:
+        tau = self.tau(device=X.device, dtype=X.dtype)
+        dt = torch.sqrt(tau.clamp_min(self.eps))
+        delta_eta = self.sched.delta_eta_tensor(tk, dt, X.device, X.dtype)
+        beta = torch.exp(-delta_eta)
+        displacement = X - X_prev
+        Q = X + beta * displacement
+        velocity = beta * displacement / dt
+        attention, gamma = self._causal_oracle(Q, velocity)
+        X_new = Q + tau * (attention - gamma)
+        if not self.no_mlp:
+            X_new = X_new + self.mlp(self.ln2(X_new))
+        self.last_h = tau.detach().item()
+        self.last_beta = beta.detach().item()
+        return X_new
+
+
+class CausalRiemannianNAGModel(nn.Module):
+    def __init__(
+        self,
+        cfg: ModelConfig,
+        *,
+        h: float = 0.1,
+        t0: float = 1.0,
+        eta_log_coef: float = 3.0,
+        eta_lin_coef: float = 0.0,
+        eta_learnable: bool = False,
+        eta_clip: float = 50.0,
+        include_connection: bool = True,
+        no_mlp: bool = False,
+    ):
+        super().__init__()
+        self.cfg = cfg
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+        self.layers = nn.ModuleList([
+            CausalRiemannianNAGLayer(
+                cfg, h=h, t0=t0, eta_log_coef=eta_log_coef,
+                eta_lin_coef=eta_lin_coef, eta_learnable=eta_learnable,
+                eta_clip=eta_clip, include_connection=include_connection,
+                no_mlp=no_mlp,
+            ) for _ in range(cfg.n_layer)
+        ])
+        self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
+        self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
+        self.lm_head.weight = self.tok_emb.weight
+        self.last_rX_max = 0.0; self.last_rP_max = 0.0
+        self.last_xi_mean = float("nan"); self.last_c_log_mean = float(eta_log_coef)
+        self.last_c_lin_mean = float(eta_lin_coef)
+        self.apply(self._init_weights)
+        # Restore the intended identity-SPD initialization after generic init.
+        init_diag = inv_softplus(1.0 - 1e-4)
+        with torch.no_grad():
+            for layer in self.layers:
+                layer.raw_A.zero_(); layer.raw_A.diagonal().fill_(init_diag)
+                layer.raw_B.zero_(); layer.raw_B.diagonal().fill_(init_diag)
+
+    def _init_weights(self, module):
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, std=0.02)
+            if module.bias is not None: nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, std=0.02)
+
+    @property
+    def last_h_mean(self):
+        return sum(layer.last_h for layer in self.layers) / len(self.layers)
+
+    def forward(self, idx, targets=None, global_step=None):
+        B, T = idx.shape
+        if T > self.cfg.block_size:
+            raise ValueError("sequence exceeds configured block size")
+        pos = torch.arange(T, device=idx.device)
+        X = self.drop(self.tok_emb(idx) + self.pos_emb(pos)[None])
+        X_prev = X
+        t_cur = float(self.layers[0].sched.t0)
+        self.last_t_start = t_cur
+        for layer in self.layers:
+            old = X
+            X = layer.step(X, X_prev, t_cur)
+            X_prev = old
+            t_cur += math.sqrt(max(layer.last_h, 1e-12))
+        self.last_t_end = t_cur
+        X = self.ln_f(X)
+        logits = self.lm_head(X)
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        return logits, loss
+
+
+class GPTModel(nn.Module):
+    def __init__(self, cfg: ModelConfig, no_mlp: bool = False, capacity_control: bool = False):
+        super().__init__()
+        self.cfg = cfg
+        self.no_mlp = bool(no_mlp)
+        self.capacity_control = bool(capacity_control)
+        self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+        self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        self.drop = nn.Dropout(cfg.dropout)
+
+        block_cls = CapacityControlGPTBlock if self.capacity_control else GPTBlock
+        self.blocks = nn.ModuleList([block_cls(cfg, no_mlp=self.no_mlp) for _ in range(cfg.n_layer)])
         self.ln_f = LayerNorm(cfg.n_embd, bias=cfg.bias)
         self.lm_head = nn.Linear(cfg.n_embd, cfg.vocab_size, bias=False)
         self.lm_head.weight = self.tok_emb.weight
@@ -2697,6 +3402,10 @@ class GPTModel(nn.Module):
         self.last_h_mean = 0.0
 
         self.apply(self._init_weights)
+        if self.capacity_control:
+            # Preserve exact functional equality with the baseline at step zero.
+            for block in self.blocks:
+                nn.init.zeros_(block.capacity_adapter.weight)
 
     def _init_weights(self, m: nn.Module):
         if isinstance(m, nn.Linear):
@@ -2755,8 +3464,12 @@ class YuriiFormerModel(nn.Module):
         # "we initialize v0 using token and positional embedding tables separate from
         #  the main token and positional embeddings." fileciteturn23file11
         self.use_v0_init = bool(use_v0_init)
-        self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
-        self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        if self.use_v0_init:
+            self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+            self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+        else:
+            self.tok_v0_emb = None
+            self.pos_v0_emb = None
         self.drop = nn.Dropout(cfg.dropout)
 
         self.blocks = nn.ModuleList([YuriiFormerLieTrotterBlock(cfg, no_mlp=self.no_mlp) for _ in range(cfg.n_layer)])
@@ -2882,27 +3595,50 @@ class PresympModel(nn.Module):
         mlp_use_p_vel: bool = False,
         no_mlp: bool = False,
         lookahead: bool = False,
+        lookahead_init: float = 0.001,
+        noise_eta: float = 0.0,
+        noise_gamma: float = 0.55,
     ):
         super().__init__()
         if mlp_use_attn_vel and mlp_use_p_vel:
             raise ValueError("mlp_use_attn_vel and mlp_use_p_vel are mutually exclusive")
         self.cfg = cfg
+        self.attn_scheme = str(attn_scheme)
         self.mlp_use_attn_vel = bool(mlp_use_attn_vel)
         self.mlp_use_p_vel = bool(mlp_use_p_vel)
         self.no_mlp = bool(no_mlp)
         self.lookahead = bool(lookahead)
+        if self.attn_scheme == "causal_ab2" and (not self.mlp_use_attn_vel or self.mlp_use_p_vel):
+            raise ValueError("causal_ab2 currently requires attention-velocity MLP coupling")
+        self.noise_eta = float(noise_eta)
+        self.noise_gamma = float(noise_gamma)
+        if self.noise_eta < 0.0:
+            raise ValueError("noise_eta must be nonnegative")
+        if self.noise_gamma < 0.0:
+            raise ValueError("noise_gamma must be nonnegative")
         self.use_v0_init = bool(use_v0_init)
         self.tok_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
         self.pos_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
 
-        # Momentum init embeddings (same idea as YuriiFormer v0): separate token+pos tables
-        # We reuse the same naming (tok_v0_emb/pos_v0_emb) so the optimizer grouping
-        # treats them as embeddings with wd=0.1.
-        self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
-        self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
-        # Separate velocity-init embeddings for the MLP velocity stream (v)
-        self.tok_v0_emb_mlp = nn.Embedding(cfg.vocab_size, cfg.n_embd)
-        self.pos_v0_emb_mlp = nn.Embedding(cfg.block_size, cfg.n_embd)
+        # Momentum initialization uses the YuriiFormer construction: one
+        # separate token/position embedding pair.  The headline attention-
+        # velocity and shared-P MLP modes need only this stream.  Allocate a
+        # second pair only for the explicitly separate MLP-velocity mode;
+        # otherwise those parameters would be trainable but permanently unused.
+        if self.use_v0_init:
+            self.tok_v0_emb = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+            self.pos_v0_emb = nn.Embedding(cfg.block_size, cfg.n_embd)
+            if self.mlp_use_attn_vel or self.mlp_use_p_vel:
+                self.tok_v0_emb_mlp = None
+                self.pos_v0_emb_mlp = None
+            else:
+                self.tok_v0_emb_mlp = nn.Embedding(cfg.vocab_size, cfg.n_embd)
+                self.pos_v0_emb_mlp = nn.Embedding(cfg.block_size, cfg.n_embd)
+        else:
+            self.tok_v0_emb = None
+            self.pos_v0_emb = None
+            self.tok_v0_emb_mlp = None
+            self.pos_v0_emb_mlp = None
         self.drop = nn.Dropout(cfg.dropout)
 
         self.blocks = nn.ModuleList([
@@ -2926,6 +3662,7 @@ class PresympModel(nn.Module):
             eta_clip=eta_clip,
                 presymp_lnp=presymp_lnp,
                 lookahead=lookahead,
+                lookahead_init=lookahead_init,
                 # xi_adapt=xi_adapt,
                 r_thresh=r_thresh,
                 r_low=r_low,
@@ -2951,6 +3688,12 @@ class PresympModel(nn.Module):
         self.last_c_lin_mean = float('nan')
 
         self.apply(self._init_weights)
+        # The generic initializer visits every Linear module and would
+        # otherwise overwrite the documented identity initialization of B.
+        for block in self.blocks:
+            attn = getattr(block, "attn", None)
+            if attn is not None and hasattr(attn, "c_B"):
+                nn.init.eye_(attn.c_B.weight)
 
     def _init_weights(self, m: nn.Module):
         if isinstance(m, nn.Linear):
@@ -2990,7 +3733,19 @@ class PresympModel(nn.Module):
         h_cnt = 0
         t_cur = float(self.blocks[0].attn.sched.t0)
         self.last_t_start = t_cur
+        t_step = int(global_step) if global_step is not None else 0
+        noise_std = 0.0
+        if self.training and self.noise_eta > 0.0:
+            noise_var = self.noise_eta / ((1.0 + float(t_step)) ** self.noise_gamma)
+            noise_std = math.sqrt(max(noise_var, 0.0))
+        ab2_F_prev = None
+        ab2_R_prev = None
+        ab2_hX_prev = None
+        ab2_hY_prev = None
         for k, blk in enumerate(self.blocks):
+            if noise_std > 0.0:
+                noise = torch.randn_like(p, dtype=torch.float32)
+                p = p + (noise_std * noise).to(dtype=p.dtype)
             attn = getattr(blk, "attn", None)
             if attn is not None and hasattr(attn, "set_layer_context"):
                 attn.set_layer_context(layer_idx=k, token_conditioned_init=self.use_v0_init)
@@ -2998,7 +3753,35 @@ class PresympModel(nn.Module):
                 blk.set_layer_context(layer_idx=k, token_conditioned_init=self.use_v0_init)
             elif hasattr(blk, '_token_conditioned_init'):
                 blk._token_conditioned_init = self.use_v0_init
-            x, p, v = blk(x, p, v, t_cur)
+            if self.attn_scheme == "causal_ab2":
+                hX_k = attn.hX(device=x.device, dtype=x.dtype)
+                hY_k = attn.hY(device=x.device, dtype=x.dtype)
+                F_k, G_k, _z_k = attn._prefix_oracle(x, p)
+                alpha_k = attn.sched.alpha(t_cur, x.device, x.dtype)
+                R_k = G_k - alpha_k * p
+                if ab2_F_prev is None:
+                    F_eff, R_eff = F_k, R_k
+                else:
+                    F_eff = variable_step_ab2(F_k, ab2_F_prev, hX_k, ab2_hX_prev)
+                    R_eff = variable_step_ab2(R_k, ab2_R_prev, hY_k, ab2_hY_prev)
+                x_new = x + hX_k * F_eff
+                p_raw = p + hY_k * R_eff
+                p_new = attn._apply_lnp(p_raw) if attn.presymp_lnp != "none" else p_raw
+                v_attn = (x_new - x) / hX_k.clamp(min=1e-8)
+                x, p = x_new, p_new
+                ab2_F_prev, ab2_R_prev = F_k, R_k
+                ab2_hX_prev, ab2_hY_prev = hX_k.detach(), hY_k.detach()
+                attn.last_h = hX_k.detach().item()
+                attn.last_hY = hY_k.detach().item()
+                attn.last_xi = 0.0
+                if not blk.no_mlp:
+                    mu = blk.mu_mlp()
+                    gamma = blk.gamma_mlp()
+                    dx = blk.mlp(blk.ln_x_mlp(x + mu * v_attn))
+                    x = x + gamma * dx
+                    v = v_attn
+            else:
+                x, p, v = blk(x, p, v, t_cur)
             attn = getattr(blk, 'attn', None)
             if attn is not None and hasattr(attn, 'last_rX'):
                 rX_max = max(rX_max, float(attn.last_rX))
@@ -3331,6 +4114,11 @@ class LinAttnPresympModel(nn.Module):
         vals = [a.last_h for a in self.attn]
         return sum(vals) / len(vals) if vals else float("nan")
 
+    @property
+    def last_hY_mean(self):
+        vals = [a.last_hY for a in self.attn]
+        return sum(vals) / len(vals) if vals else float("nan")
+
     def forward(self, idx, targets=None, global_step=None):
         B, T = idx.shape
         pos = torch.arange(T, device=idx.device)
@@ -3340,14 +4128,22 @@ class LinAttnPresympModel(nn.Module):
         else:
             y = torch.zeros_like(x)
         v = torch.zeros_like(x)
+        t_cur = float(self.attn[0].sched.t0)
+        self.last_t_start = t_cur
 
         for k in range(self.cfg.n_layer):
-            x_new, y_new = self.attn[k].step(x, y, k)
+            x_new, y_new = self.attn[k].step(x, y, t_cur)
+            h_k = self.attn[k].h(device=x.device, dtype=x.dtype)
             if not self.no_mlp:
-                v_attn = (x_new - x) / self.attn[k].h().clamp(min=1e-8)
+                v_attn = (x_new - x) / h_k.clamp(min=1e-8)
                 x_new, v = self.mlp_steps[k](x_new, v, v_attn=v_attn)
             x, y = x_new, y_new
+            t_cur += h_k.detach().item()
 
+        self.last_t_end = t_cur
+        coefficients = [_get_eta_coefs(layer.sched) for layer in self.attn]
+        self.last_c_log_mean = sum(item[0] for item in coefficients) / len(coefficients)
+        self.last_c_lin_mean = sum(item[1] for item in coefficients) / len(coefficients)
         x = self.ln_f(x)
         logits = self.lm_head(x)
         loss = None
@@ -3416,6 +4212,7 @@ def _attach_generate_method() -> None:
         LinAttnPresympModel,
         LinAttnAB2Model,
         LinAttnETDAB2Model,
+        LinAttnReducedModel,
     ]
     for cls in classes:
         setattr(cls, "generate", _generic_generate)
