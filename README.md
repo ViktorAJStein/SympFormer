@@ -6,12 +6,13 @@ The repository currently contains:
 - a baseline GPT-style causal language model,
 - an implementation of the [Yuriiformer](https://arxiv.org/abs/2601.23236) (Zimin et al, 2026) architecture, specifically the Lie-Trotter Nesterov acceleration,
 - several softmax-attention presymplectic / Euler / higher-order variants,
-- several linear-attention analogues,
+- several linear-attention analogs,
 - dataset preprocessing scripts for TinyStories and OpenWebText,
 - a training script with checkpointing, metric logging, and optional text sampling,
 - plotting and batch-job helper scripts.
 
 
+# Currently under construction!!
 ---
 
 ## Repository layout
@@ -24,8 +25,6 @@ data.py                   # dataset loading + deterministic token block iterator
 preprocess_tinystories.py # downloads/tokenizes TinyStories into .bin files
 process_openwebtext.py    # downloads/tokenizes OpenWebText into .bin files
 plot_compare.py           # compare runs from their metrics.csv files
-job.job                   # example SLURM job for softmax-attention variants
-job_lin.job               # example SLURM job for linear-attention variants
 ```
 
 ---
