@@ -1,0 +1,22 @@
+{
+  "method": "Y",
+  "layout": "untied",
+  "dataset": "openwebtext",
+  "seed": 97021,
+  "validation_seed": 97018,
+  "width": 256,
+  "heads": 8,
+  "context": 512,
+  "vocab": 50304,
+  "batch": 4,
+  "accumulation": 8,
+  "updates": 6103,
+  "eval_interval": 100,
+  "eval_batches": 16,
+  "peak_lr": 0.0006,
+  "scalar_lr_mult": 10.0,
+  "warmup_ratio": 0.1,
+  "min_lr_ratio": 0.1,
+  "grad_clip": 1.0,
+  "version": "e063_two_block_recurrence_v1"
+}

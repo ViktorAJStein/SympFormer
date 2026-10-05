@@ -1,0 +1,3088 @@
+{
+  "version": "arxiv_v4_numerics_20261005",
+  "actual_tokens": 99991552,
+  "tokens_per_update": 16384,
+  "historical_gpu": "NVIDIA RTX A6000",
+  "precision": "IEEE FP32;TF32 off",
+  "cells": [
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_tinystories_s70023.json",
+      "dataset": "tinystories",
+      "seed": 70023,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_tinystories_s70023.json",
+      "dataset": "tinystories",
+      "seed": 70023,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_tinystories_s70023.json",
+      "dataset": "tinystories",
+      "seed": 70023,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_tinystories_s70023.json",
+      "dataset": "tinystories",
+      "seed": 70023,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_tinystories_s70023.json",
+      "dataset": "tinystories",
+      "seed": 70023,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_tinystories_s70024.json",
+      "dataset": "tinystories",
+      "seed": 70024,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_tinystories_s70024.json",
+      "dataset": "tinystories",
+      "seed": 70024,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_tinystories_s70024.json",
+      "dataset": "tinystories",
+      "seed": 70024,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_tinystories_s70024.json",
+      "dataset": "tinystories",
+      "seed": 70024,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_tinystories_s70024.json",
+      "dataset": "tinystories",
+      "seed": 70024,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_openwebtext_s71023.json",
+      "dataset": "openwebtext",
+      "seed": 71023,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_openwebtext_s71023.json",
+      "dataset": "openwebtext",
+      "seed": 71023,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_openwebtext_s71023.json",
+      "dataset": "openwebtext",
+      "seed": 71023,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_openwebtext_s71023.json",
+      "dataset": "openwebtext",
+      "seed": 71023,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_openwebtext_s71023.json",
+      "dataset": "openwebtext",
+      "seed": 71023,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/B_openwebtext_s71024.json",
+      "dataset": "openwebtext",
+      "seed": 71024,
+      "method": "B"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/Y_openwebtext_s71024.json",
+      "dataset": "openwebtext",
+      "seed": 71024,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H0_openwebtext_s71024.json",
+      "dataset": "openwebtext",
+      "seed": 71024,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/H1_openwebtext_s71024.json",
+      "dataset": "openwebtext",
+      "seed": 71024,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_primary",
+      "runtime": "softmax",
+      "config": "configs/softmax_primary/R2_openwebtext_s71024.json",
+      "dataset": "openwebtext",
+      "seed": 71024,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70024.json",
+      "dataset": "tinystories",
+      "seed": 70024,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70024.json",
+      "dataset": "tinystories",
+      "seed": 70024,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_tinystories_d256_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_tinystories_d256_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_openwebtext_d256_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_openwebtext_d256_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_openwebtext_d256_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70023.json",
+      "dataset": "tinystories",
+      "seed": 70023,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70023.json",
+      "dataset": "tinystories",
+      "seed": 70023,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_tinystories_d256_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_tinystories_d256_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71023.json",
+      "dataset": "openwebtext",
+      "seed": 71023,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_openwebtext_d256_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71023.json",
+      "dataset": "openwebtext",
+      "seed": 71023,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_openwebtext_d256_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_openwebtext_d256_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_tinystories_d256_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_tinystories_d256_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71024.json",
+      "dataset": "openwebtext",
+      "seed": 71024,
+      "method": "R2_LA"
+    },
+    {
+      "study": "softmax_lookahead",
+      "runtime": "softmax",
+      "config": "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71024.json",
+      "dataset": "openwebtext",
+      "seed": 71024,
+      "method": "H1_LA"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_H0_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_R2_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_Y_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_R2_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_Y_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_H0_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_H1_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_H1_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_B_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_B_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_H1_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_H0_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_R2_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_R2_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_H0_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_H0_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_R2_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_H1_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_B_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_B_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_Y_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_Y_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_H1_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_H1_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_Y_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_Y_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_H0_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_R2_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_B_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_B_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_B_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_B_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_H1_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_Y_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_Y_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_H0_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_R2_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_R2_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_H0_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_Y_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_Y_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_H0_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_R2_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_B_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_B_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_H1_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_H1_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_H1_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_R2_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_H0_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_H0_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_R2_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_Y_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_Y_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_H0_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_R2_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_H1_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_H1_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_B_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_B_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_H0_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_R2_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_R2_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_H0_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_Y_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_Y_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_H1_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_B_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_B_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_H1_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_H1_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_B_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_B_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_H0_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_R2_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_Y_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_Y_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_R2_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_H0_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_H0_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_R2_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_B_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_B_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_H1_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_H1_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_Y_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_Y_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_H1_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_H0_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_R2_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_H1_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_H0_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_R2_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_R2_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_H0_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_B_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_B_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_H0_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_R2_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_H1_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_H1_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_Y_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_Y_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_Y_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s1_Y_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_H1_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_B_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_B_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_R2_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_H0_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s6_H0_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_R2_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_B_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s3_B_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s5_Y_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s0_H0_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_Y_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s2_R2_1.json",
+      "dataset": "openwebtext",
+      "seed": 94021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s4_H1_0.json",
+      "dataset": "openwebtext",
+      "seed": 94020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_shapes",
+      "runtime": "aspect",
+      "config": "configs/softmax_shapes/s7_H1_2.json",
+      "dataset": "openwebtext",
+      "seed": 94022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/H1_eta_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/H1_eta_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/H1_eta_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/R2_eta_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/R2_eta_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/R2_eta_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/R2_eta_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/R2_eta_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/R2_eta_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/H1_eta_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/H1_eta_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_strength",
+      "runtime": "strength",
+      "config": "configs/softmax_strength/H1_eta_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "H1"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/R2_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/B_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/R2_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/B_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/R2_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/B_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/B_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "B"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/R2_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/B_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "B"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/R2_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/B_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "B"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/R2_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "R2"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/Y_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/H0_tinystories_s70020.json",
+      "dataset": "tinystories",
+      "seed": 70020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/Y_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/H0_tinystories_s70021.json",
+      "dataset": "tinystories",
+      "seed": 70021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/Y_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/H0_tinystories_s70022.json",
+      "dataset": "tinystories",
+      "seed": 70022,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/Y_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/H0_openwebtext_s71020.json",
+      "dataset": "openwebtext",
+      "seed": 71020,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/Y_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/H0_openwebtext_s71021.json",
+      "dataset": "openwebtext",
+      "seed": 71021,
+      "method": "H0"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/Y_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "Y"
+    },
+    {
+      "study": "softmax_width256",
+      "runtime": "softmax",
+      "config": "configs/softmax_width256/H0_openwebtext_s71022.json",
+      "dataset": "openwebtext",
+      "seed": 71022,
+      "method": "H0"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_R2_L_openwebtext_s95021.json",
+      "dataset": "openwebtext",
+      "seed": 95021,
+      "method": "R2_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_Y_L_openwebtext_s95022.json",
+      "dataset": "openwebtext",
+      "seed": 95022,
+      "method": "Y_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H0_L_openwebtext_s95020.json",
+      "dataset": "openwebtext",
+      "seed": 95020,
+      "method": "H0_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H1_L_tinystories_s95020.json",
+      "dataset": "tinystories",
+      "seed": 95020,
+      "method": "H1_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_R2_L_tinystories_s95022.json",
+      "dataset": "tinystories",
+      "seed": 95022,
+      "method": "R2_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_Y_L_tinystories_s95021.json",
+      "dataset": "tinystories",
+      "seed": 95021,
+      "method": "Y_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_B_L_openwebtext_s95022.json",
+      "dataset": "openwebtext",
+      "seed": 95022,
+      "method": "B_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_B_L_tinystories_s95021.json",
+      "dataset": "tinystories",
+      "seed": 95021,
+      "method": "B_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_B_L_tinystories_s95020.json",
+      "dataset": "tinystories",
+      "seed": 95020,
+      "method": "B_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H0_L_tinystories_s95022.json",
+      "dataset": "tinystories",
+      "seed": 95022,
+      "method": "H0_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_Y_L_tinystories_s95020.json",
+      "dataset": "tinystories",
+      "seed": 95020,
+      "method": "Y_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H1_L_openwebtext_s95022.json",
+      "dataset": "openwebtext",
+      "seed": 95022,
+      "method": "H1_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H1_L_tinystories_s95021.json",
+      "dataset": "tinystories",
+      "seed": 95021,
+      "method": "H1_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H0_L_openwebtext_s95021.json",
+      "dataset": "openwebtext",
+      "seed": 95021,
+      "method": "H0_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_R2_L_openwebtext_s95020.json",
+      "dataset": "openwebtext",
+      "seed": 95020,
+      "method": "R2_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H0_L_tinystories_s95021.json",
+      "dataset": "tinystories",
+      "seed": 95021,
+      "method": "H0_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_R2_L_tinystories_s95020.json",
+      "dataset": "tinystories",
+      "seed": 95020,
+      "method": "R2_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H1_L_openwebtext_s95021.json",
+      "dataset": "openwebtext",
+      "seed": 95021,
+      "method": "H1_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H1_L_tinystories_s95022.json",
+      "dataset": "tinystories",
+      "seed": 95022,
+      "method": "H1_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H0_L_openwebtext_s95022.json",
+      "dataset": "openwebtext",
+      "seed": 95022,
+      "method": "H0_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_Y_L_openwebtext_s95020.json",
+      "dataset": "openwebtext",
+      "seed": 95020,
+      "method": "Y_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_B_L_openwebtext_s95020.json",
+      "dataset": "openwebtext",
+      "seed": 95020,
+      "method": "B_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_B_L_openwebtext_s95021.json",
+      "dataset": "openwebtext",
+      "seed": 95021,
+      "method": "B_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_B_L_tinystories_s95022.json",
+      "dataset": "tinystories",
+      "seed": 95022,
+      "method": "B_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_R2_L_openwebtext_s95022.json",
+      "dataset": "openwebtext",
+      "seed": 95022,
+      "method": "R2_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_Y_L_openwebtext_s95021.json",
+      "dataset": "openwebtext",
+      "seed": 95021,
+      "method": "Y_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H1_L_openwebtext_s95020.json",
+      "dataset": "openwebtext",
+      "seed": 95020,
+      "method": "H1_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_R2_L_tinystories_s95021.json",
+      "dataset": "tinystories",
+      "seed": 95021,
+      "method": "R2_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_Y_L_tinystories_s95022.json",
+      "dataset": "tinystories",
+      "seed": 95022,
+      "method": "Y_L"
+    },
+    {
+      "study": "linear_primary",
+      "runtime": "linear",
+      "config": "configs/linear_primary/e062_H0_L_tinystories_s95020.json",
+      "dataset": "tinystories",
+      "seed": 95020,
+      "method": "H0_L"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_B_S_openwebtext_s95021.json",
+      "dataset": "openwebtext",
+      "seed": 95021,
+      "method": "B_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_B_S_tinystories_s95022.json",
+      "dataset": "tinystories",
+      "seed": 95022,
+      "method": "B_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_Y_S_openwebtext_s95021.json",
+      "dataset": "openwebtext",
+      "seed": 95021,
+      "method": "Y_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_Y_S_tinystories_s95022.json",
+      "dataset": "tinystories",
+      "seed": 95022,
+      "method": "Y_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_Y_S_openwebtext_s95020.json",
+      "dataset": "openwebtext",
+      "seed": 95020,
+      "method": "Y_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_B_S_openwebtext_s95020.json",
+      "dataset": "openwebtext",
+      "seed": 95020,
+      "method": "B_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_B_S_tinystories_s95020.json",
+      "dataset": "tinystories",
+      "seed": 95020,
+      "method": "B_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_Y_S_tinystories_s95020.json",
+      "dataset": "tinystories",
+      "seed": 95020,
+      "method": "Y_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_Y_S_openwebtext_s95022.json",
+      "dataset": "openwebtext",
+      "seed": 95022,
+      "method": "Y_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_Y_S_tinystories_s95021.json",
+      "dataset": "tinystories",
+      "seed": 95021,
+      "method": "Y_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_B_S_openwebtext_s95022.json",
+      "dataset": "openwebtext",
+      "seed": 95022,
+      "method": "B_S"
+    },
+    {
+      "study": "linear_statistical_controls",
+      "runtime": "linear",
+      "config": "configs/linear_statistical_controls/e062_B_S_tinystories_s95021.json",
+      "dataset": "tinystories",
+      "seed": 95021,
+      "method": "B_S"
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_tied_openwebtext_s97020.json",
+      "method": "B",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_tied_openwebtext_s97021.json",
+      "method": "B",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_tied_openwebtext_s97022.json",
+      "method": "B",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_tied_tinystories_s97020.json",
+      "method": "B",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_tied_tinystories_s97021.json",
+      "method": "B",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_tied_tinystories_s97022.json",
+      "method": "B",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_untied_openwebtext_s97020.json",
+      "method": "B",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_untied_openwebtext_s97021.json",
+      "method": "B",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_untied_openwebtext_s97022.json",
+      "method": "B",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_untied_tinystories_s97020.json",
+      "method": "B",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_untied_tinystories_s97021.json",
+      "method": "B",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/B_untied_tinystories_s97022.json",
+      "method": "B",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_tied_openwebtext_s97020.json",
+      "method": "H0",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_tied_openwebtext_s97021.json",
+      "method": "H0",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_tied_openwebtext_s97022.json",
+      "method": "H0",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_tied_tinystories_s97020.json",
+      "method": "H0",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_tied_tinystories_s97021.json",
+      "method": "H0",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_tied_tinystories_s97022.json",
+      "method": "H0",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_untied_openwebtext_s97020.json",
+      "method": "H0",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_untied_openwebtext_s97021.json",
+      "method": "H0",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_untied_openwebtext_s97022.json",
+      "method": "H0",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_untied_tinystories_s97020.json",
+      "method": "H0",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_untied_tinystories_s97021.json",
+      "method": "H0",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/H0_untied_tinystories_s97022.json",
+      "method": "H0",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_tied_openwebtext_s97020.json",
+      "method": "R2",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_tied_openwebtext_s97021.json",
+      "method": "R2",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_tied_openwebtext_s97022.json",
+      "method": "R2",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_tied_tinystories_s97020.json",
+      "method": "R2",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_tied_tinystories_s97021.json",
+      "method": "R2",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_tied_tinystories_s97022.json",
+      "method": "R2",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_untied_openwebtext_s97020.json",
+      "method": "R2",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_untied_openwebtext_s97021.json",
+      "method": "R2",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_untied_openwebtext_s97022.json",
+      "method": "R2",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_untied_tinystories_s97020.json",
+      "method": "R2",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_untied_tinystories_s97021.json",
+      "method": "R2",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/R2_untied_tinystories_s97022.json",
+      "method": "R2",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_tied_openwebtext_s97020.json",
+      "method": "Y",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_tied_openwebtext_s97021.json",
+      "method": "Y",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_tied_openwebtext_s97022.json",
+      "method": "Y",
+      "layout": "tied",
+      "dataset": "openwebtext",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_tied_tinystories_s97020.json",
+      "method": "Y",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_tied_tinystories_s97021.json",
+      "method": "Y",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_tied_tinystories_s97022.json",
+      "method": "Y",
+      "layout": "tied",
+      "dataset": "tinystories",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_untied_openwebtext_s97020.json",
+      "method": "Y",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_untied_openwebtext_s97021.json",
+      "method": "Y",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_untied_openwebtext_s97022.json",
+      "method": "Y",
+      "layout": "untied",
+      "dataset": "openwebtext",
+      "seed": 97022
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_untied_tinystories_s97020.json",
+      "method": "Y",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97020
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_untied_tinystories_s97021.json",
+      "method": "Y",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97021
+    },
+    {
+      "study": "softmax_looped",
+      "runtime": "looped",
+      "config": "configs/softmax_looped/Y_untied_tinystories_s97022.json",
+      "method": "Y",
+      "layout": "untied",
+      "dataset": "tinystories",
+      "seed": 97022
+    }
+  ],
+  "counts": {
+    "linear_primary": 30,
+    "softmax_lookahead": 32,
+    "softmax_primary": 50,
+    "softmax_shapes": 120,
+    "softmax_strength": 12,
+    "softmax_width256": 24,
+    "linear_statistical_controls": 12,
+    "softmax_looped": 48
+  },
+  "limitations": "Frozen historical100M diagnostics including256dlooping, not the prospective1Bstudy. Primarysoftmax/context128 vslinear/context512 mustnotbe pooled; no equalcompute claim.",
+  "numerics_section_commit": "b7cd2ff",
+  "core_sha256": {
+    "common/model.py": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+    "common/data.py": "2f27811d1e0a93ced1065efe3ee4f647b3fe1d0711f4944e1c1b6e7fb91fee58",
+    "common/matched_prefix.py": "8a4a6392ac697672a69bc4b4bdbd72772fed28f5395a6862be8ead1fb1b0e2ff",
+    "common/riemannian_prefix.py": "09b1eb96a2249caf24e734eb32e8cfdffd4a929c2974f81699fbb14157f8ada0",
+    "common/pyproject.toml": "da4f9bd853fbc58690f588e59dd41d201583d55a85ddde2765a297b9a333fb0f",
+    "common/uv.lock": "f62650e5a86a8e40b05f09529ddede158b80097a013de225ac0c1209a04cc68d",
+    "softmax/train.py": "31450a60fa2558cc3486b39840de76d3196398a17253cb7c582c5927b73a7bcb",
+    "softmax/normalized_hb.py": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+    "softmax/scripts/attention_lookahead_model.py": "bf87c4c56d65cfecef5e013310a661395f368b1938db695a90278a3b588a3e8c",
+    "linear/train.py": "d1115d4b4d066ca108677c18636d4163699369cab6dbe6c04386089f659d3607",
+    "linear/normalized_hb.py": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+    "linear/scripts/linear_hb_model.py": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+    "linear/scripts/linear_hb_diagnostics.py": "0fe75fe30496c89534ca8ae566a1a8dcf3753d6230dccbd8149918aefe41ea59",
+    "linear/scripts/verify_trained_linear_closure.py": "d1b6176ec4eb40997f18c085f377034e35edeb15b819224aa4fe69fb1c8b599a",
+    "aspect/train.py": "d89827e5e5238bf5f1022886a67bbc21bb3791d68a6bc44627ed476ed9afa44a",
+    "aspect/normalized_hb.py": "18d2436022d6993e8228a11c8b51ee35b725bbf398e7809f794d61c441481c7b",
+    "aspect/aspect_ratio_protocol.py": "7dcc62bfbfbd177736c47efa67c79a3dc15fb063bfd6b7f19216c9abb55e2b4a",
+    "strength/train.py": "cc722002d744d977dcce7ac1975f034c5534c29d47363c4f440740840ac1025e",
+    "strength/normalized_hb.py": "18d2436022d6993e8228a11c8b51ee35b725bbf398e7809f794d61c441481c7b",
+    "checks/verify_linear.py": "630b5fa390517f6bfe2a662bb865c4e191f4d1cdfc6042a1d35fed9903cfbc36",
+    "checks/verify_softmax.py": "3a24ab60ed8102d033ae717a75b3acc6ef97857dfeafc26c797c326aac0c4e03",
+    "checks/verify_strength.py": "c3ef2c66577ca74aa398ab5e9d6bd88449b97789c78af81a47c1127d503b726c",
+    "softmax/scripts/verify_normalized_hb.py": "3e27ef5e461a6da11ec23400535f3aad79b94c4c8dcfbbb2bef0901d6f5a4de4",
+    "looped/uv.lock": "f62650e5a86a8e40b05f09529ddede158b80097a013de225ac0c1209a04cc68d",
+    "looped/riemannian_prefix.py": "09b1eb96a2249caf24e734eb32e8cfdffd4a929c2974f81699fbb14157f8ada0",
+    "looped/pyproject.toml": "da4f9bd853fbc58690f588e59dd41d201583d55a85ddde2765a297b9a333fb0f",
+    "looped/model.py": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+    "looped/normalized_hb.py": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+    "looped/train.py": "d825d93460c49492121497392877c3807c384b5695a83066b1119c9fa24c4213",
+    "looped/matched_prefix.py": "8a4a6392ac697672a69bc4b4bdbd72772fed28f5395a6862be8ead1fb1b0e2ff",
+    "looped/data.py": "2f27811d1e0a93ced1065efe3ee4f647b3fe1d0711f4944e1c1b6e7fb91fee58",
+    "looped/scripts/verify_looped_hb.py": "a4ef87199b85a48d1a442cf9c3848a983813f83d997773de7d8003f9711c1c14",
+    "looped/scripts/looped_hb_model.py": "cde67a33e3ea56e0d36f884bef288d91012f0219b71614e74613188924bd2c20",
+    "looped/scripts/looped_hb_telemetry.py": "10aab398565e3ea0241493f7484478657e7b109f2a6f6ca36aaff7a015e580b9",
+    "looped/scripts/train_looped_hb.py": "a1a275c831599166bf34ab9ffcb351c47363313ea18f9fb6346387355ed5d797"
+  },
+  "ancestry": {
+    "softmax": {
+      "train.py": "31450a60fa2558cc3486b39840de76d3196398a17253cb7c582c5927b73a7bcb",
+      "normalized_hb.py": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+      "scripts/attention_lookahead_model.py": "bf87c4c56d65cfecef5e013310a661395f368b1938db695a90278a3b588a3e8c"
+    },
+    "linear": {
+      "train.py": "d1115d4b4d066ca108677c18636d4163699369cab6dbe6c04386089f659d3607",
+      "normalized_hb.py": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+      "scripts/linear_hb_model.py": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "scripts/linear_hb_diagnostics.py": "0fe75fe30496c89534ca8ae566a1a8dcf3753d6230dccbd8149918aefe41ea59"
+    },
+    "aspect": {
+      "train.py": "d89827e5e5238bf5f1022886a67bbc21bb3791d68a6bc44627ed476ed9afa44a",
+      "normalized_hb.py": "18d2436022d6993e8228a11c8b51ee35b725bbf398e7809f794d61c441481c7b",
+      "aspect_ratio_protocol.py": "7dcc62bfbfbd177736c47efa67c79a3dc15fb063bfd6b7f19216c9abb55e2b4a"
+    },
+    "strength": {
+      "train.py": "cc722002d744d977dcce7ac1975f034c5534c29d47363c4f440740840ac1025e",
+      "normalized_hb.py": "18d2436022d6993e8228a11c8b51ee35b725bbf398e7809f794d61c441481c7b"
+    }
+  },
+  "config_sha256": {
+    "configs/softmax_primary/B_tinystories_s70020.json": "50d96212afc65394d01122af20006f788e81695813f916d317c58af1045eba01",
+    "configs/softmax_primary/Y_tinystories_s70020.json": "fbd78b0a3d135355766d83093fda547d5078fc3ddfe3fd251e16247515ec4401",
+    "configs/softmax_primary/H0_tinystories_s70020.json": "91338c48ab6a1e895d5a53c0b0d386e25ea18c21f37258b627ba18a51e1356d5",
+    "configs/softmax_primary/H1_tinystories_s70020.json": "a47d2e7806162fda0153ce7abdaf0dde1f164ef4a2589fd33fd8aa8c911d4472",
+    "configs/softmax_primary/R2_tinystories_s70020.json": "9d41d9fca9d8346399ed8af938ead1a682a6f05c027e25d62fa15a46c5427381",
+    "configs/softmax_primary/B_tinystories_s70021.json": "43df015e9c2aab82f0f5b4e4ff29be084b42b7de1b3605dafdcd0938b239a1f1",
+    "configs/softmax_primary/Y_tinystories_s70021.json": "34fea1179294116fa7a03274fe9229d80ef95a8ecd411f543804e8c1a76eceea",
+    "configs/softmax_primary/H0_tinystories_s70021.json": "eabcf0d5381c1fae49baad4206fddaec11cecc3fab06b46b6c47d074355822eb",
+    "configs/softmax_primary/H1_tinystories_s70021.json": "2ae3527c20230e7d41b29805a216ad8a41f06f39f709f98f10242ad5c7bd997f",
+    "configs/softmax_primary/R2_tinystories_s70021.json": "84e4600fafa2904a6a33065f368a235d893ca69d289ed8e83fb3dd6072f93724",
+    "configs/softmax_primary/B_tinystories_s70022.json": "3141cea0b8a6c5e5c6bba5194fdecc2fc1a12349d5fc03e713d9133b8384ad25",
+    "configs/softmax_primary/Y_tinystories_s70022.json": "8cb2e82b0b2fd8500a71d0e0652d66ec6049914d9c48d59bb3c980c92071f783",
+    "configs/softmax_primary/H0_tinystories_s70022.json": "a4769b8365400f07991fae476e2fb759838fc7660376ccc738e4ad254e93bb0f",
+    "configs/softmax_primary/H1_tinystories_s70022.json": "42bdf0da7af92a8a6152dffaa8b6c747220a8266300a05139cf33ffcb719d6e6",
+    "configs/softmax_primary/R2_tinystories_s70022.json": "f612c730eb48aca18c9e4e920fe559c3b4420aae389c84d52ec6f451b136fdcf",
+    "configs/softmax_primary/B_tinystories_s70023.json": "1050fbb9c37999bf81ab397c603123a4a40b9715c9c66c500dcd3608002ec223",
+    "configs/softmax_primary/Y_tinystories_s70023.json": "17ccde85285ee567a4b50c32f2ff170d9b5378132af63e75db5ead8f19096b1f",
+    "configs/softmax_primary/H0_tinystories_s70023.json": "9c1de4efe67a492ac54e42642e87cc46eebdb811e587770e0855e2dda3dddf69",
+    "configs/softmax_primary/H1_tinystories_s70023.json": "6883c371532221c91124a34fd1a8d6692a4db23c6237543ba67c9076b9469b5d",
+    "configs/softmax_primary/R2_tinystories_s70023.json": "543fdf2432d8b3a7a7aefba790b8bf51dd5cdc0c2af779fed8f420ad1f6b537e",
+    "configs/softmax_primary/B_tinystories_s70024.json": "ef0d7e6d858f51638d3f970d219692012fbbb7d6e130ab522d341c2be233df8f",
+    "configs/softmax_primary/Y_tinystories_s70024.json": "4942ad8d03fb7027f59c29dd226dfe978b04ffead0a7f7ecc7f99a6f23e4ffff",
+    "configs/softmax_primary/H0_tinystories_s70024.json": "3c3bc142d42b6b58744d768a8684a9e1de86035dccd84a9a424cd9bc2f5a66f3",
+    "configs/softmax_primary/H1_tinystories_s70024.json": "e7eeeff7332bb4759f1c7a2ad0d41edca723b1120b5e5f93e81cfcc06906d8bf",
+    "configs/softmax_primary/R2_tinystories_s70024.json": "da04fe818fd4d8dec48af96c248d1c665cb53e189e96eb18908fd9a77bcd1f01",
+    "configs/softmax_primary/B_openwebtext_s71020.json": "ad080f120ad8ce7f176aad1b0a02452637532707472a64f4fc684507226ebd0f",
+    "configs/softmax_primary/Y_openwebtext_s71020.json": "2248de5fb1c31d5930fc6817a70c0f895c9659b8f4a1865291aa2ec48f266d4d",
+    "configs/softmax_primary/H0_openwebtext_s71020.json": "03d080facbeec7f2507c3ba60ab1a994e37f1bc052e4ce37f236ecf00ce1fbca",
+    "configs/softmax_primary/H1_openwebtext_s71020.json": "dd95d3c1605b94f641041523998f55e4e983a91160a4b5573e3b76982fa5559b",
+    "configs/softmax_primary/R2_openwebtext_s71020.json": "95c217208f797385abce4c4a8e241ee363100690cde4d8ea3797af3fc31cd344",
+    "configs/softmax_primary/B_openwebtext_s71021.json": "5007fb87281e26608b83dcfdf400b6ae8469f81cc337c73bc62d358120158288",
+    "configs/softmax_primary/Y_openwebtext_s71021.json": "a178357e623446f6b6597428df3e519461aedec6e6901a19e38cf7cbc0164170",
+    "configs/softmax_primary/H0_openwebtext_s71021.json": "8b74599b3c7e40132445d86577503e50bca621adc8601517400fbf67146cab11",
+    "configs/softmax_primary/H1_openwebtext_s71021.json": "6341fc98bbe34fb2b5eaf9b781bb06153d42a13d1f3153172549da378681338b",
+    "configs/softmax_primary/R2_openwebtext_s71021.json": "b5458f52f6d5313b3d1df1a00a2128c607b83d50156b38e63849c50c3062bf3e",
+    "configs/softmax_primary/B_openwebtext_s71022.json": "7f607a838770eb7b67d97a425b4ff3ef40a87b6fda571ced6b993ac16af3492b",
+    "configs/softmax_primary/Y_openwebtext_s71022.json": "d802b76c7d9e91f2191fda9ab91a06c1fb41abd660ab10121a907bbaec16a81d",
+    "configs/softmax_primary/H0_openwebtext_s71022.json": "9359efc29b970bd4a217549678f61510e654289802013eb3caad988eb99d5582",
+    "configs/softmax_primary/H1_openwebtext_s71022.json": "2272a5c2d495ce7cbffce2b21515cbdbb6d756add05fa30c92064cde4d568c89",
+    "configs/softmax_primary/R2_openwebtext_s71022.json": "a5ba5a9e2ff9598768f980971ba7f1179cdb0077c4f7a00d50aa921db73c4ac7",
+    "configs/softmax_primary/B_openwebtext_s71023.json": "dd1181791b1cf5ca015fff5d544d2e59055fe117e8ed0d1f3290552cd001b85d",
+    "configs/softmax_primary/Y_openwebtext_s71023.json": "5d380fda27f6494ae4004045524612d2514432bc0743105222c1bc5a25169bae",
+    "configs/softmax_primary/H0_openwebtext_s71023.json": "c7c4d5754f3c08630e61470026e9636da10e4cc7d7c23914d8a18d785eb86118",
+    "configs/softmax_primary/H1_openwebtext_s71023.json": "c6626f932535460c2a5938b1eed530d2e04595ed79cbd23bbb82ecdf6ed5428f",
+    "configs/softmax_primary/R2_openwebtext_s71023.json": "7b3f4cfc1c48ae1f239ebc945417804d7fffb471b1964bb8fe2aea9c1439f852",
+    "configs/softmax_primary/B_openwebtext_s71024.json": "ded191d76bae97da699399f9a42fea507f3eba5eaf0dbf64a628004386658713",
+    "configs/softmax_primary/Y_openwebtext_s71024.json": "b8acdd7dad66a450fbd0ff8269573ad5374bbde779cd0e35d98585b21761921d",
+    "configs/softmax_primary/H0_openwebtext_s71024.json": "7a9a7afbec8f28daf8577c05760b30ae56af7fbc799ead5a2f97028e7f896b07",
+    "configs/softmax_primary/H1_openwebtext_s71024.json": "797559cf3dea9e9e31b68e05eb166faa8bee2c2fbf31054d4dd3c99d22b4dbbe",
+    "configs/softmax_primary/R2_openwebtext_s71024.json": "3067d209bf7dabc22ddbd3f3dd69226b9b0ba379709c2d5ba26be1608cacb226",
+    "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70024.json": "9c6282cfde2d2230f320a3bc99c3d47c2a60b2547ad76d626c0f27372f6c043d",
+    "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70024.json": "b20b4d4ca5988cd9defed8b059247be3c31c7ddc181d512eb89116c79009d5b4",
+    "configs/softmax_lookahead/e061_R2_LA_tinystories_d256_s70021.json": "a7c6716b9373f689c65506355fb393cf75ee5674ccb8bd833276f0e27135abe7",
+    "configs/softmax_lookahead/e061_H1_LA_tinystories_d256_s70022.json": "c049543a854571c2a48db5d14f63680d17e62244eb2ac561c1a42a51c7af0f4a",
+    "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71021.json": "d3dbffafae98f376a3cf3b529398241aff27e568db8da2ad3519711f426a0c2e",
+    "configs/softmax_lookahead/e061_R2_LA_openwebtext_d256_s71022.json": "e44ffac4047e9200f4089d0af5c82b7af32c3a7df4d0c94f1d538495d73f805f",
+    "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70022.json": "0c596c8a94b370983d795047198eaa2ce9f9003ecc9675d553db57e3f4d5b216",
+    "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70022.json": "6d01170c95b3e30589a3973106dce2ff34ce3e75120be5329f5c3994c2b9af6b",
+    "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71021.json": "3b63d6935802c8e68c723ab40f0202b13f053a836875e812bb40f0320bb3a127",
+    "configs/softmax_lookahead/e061_H1_LA_openwebtext_d256_s71021.json": "91f0ef1ad7bd23234736a1ed333d125397e8372bb23a89216f5b7021d1dde1c3",
+    "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71020.json": "67a3770582d1d71a820b77efb939c997d3becd49ff099a89ebf92b21ce6e3558",
+    "configs/softmax_lookahead/e061_H1_LA_openwebtext_d256_s71020.json": "ca6a257ac8a892f034a46b0b77cbc055daa0150ece6de2e0be78f3ba09528f04",
+    "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70023.json": "ec67864137b72b37096b02912ad3d90d27a70b5662006ac1cb205ad180ab511f",
+    "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70023.json": "944fc62429781edf4e642bfa0a65243aa87474232bdf226368897c9f306f0c39",
+    "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71020.json": "938adc6a40e3803605f0834f96bf687b99be1e22ec0830f29cf5a01ec628dc97",
+    "configs/softmax_lookahead/e061_R2_LA_tinystories_d256_s70020.json": "ceb08e0d29173f87ce44f383d8d69fba09ed13fe026d77d4b6ab0ed7c6419a4c",
+    "configs/softmax_lookahead/e061_H1_LA_tinystories_d256_s70020.json": "7f72b9eea9383b03a1e5dbe1bca5dea4228c7f42020a5c0e7de0e6983d60cb75",
+    "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71023.json": "7424c48262b58bc5439e8dd042904138be12ea8f5b4d7b629dffda6b1073366b",
+    "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70020.json": "1aa882aedc586e780b1a5ef0090dd2ebe5ce006dc82f1be382f5b1bdbfe7af58",
+    "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70020.json": "9d40b94f4216a83d2c049c2628f3db81934c62251f07e13204c4f6ebabbba314",
+    "configs/softmax_lookahead/e061_R2_LA_openwebtext_d256_s71020.json": "4f6abd4b12f9c2bbada237b5ffef675223e942ab3909d042717a20b54c8f29d9",
+    "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71023.json": "6c3d2373971badbcf3f447a937e4fe3f86e0e588ee5625d1e275081f623171af",
+    "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71022.json": "d50ca98dd5120e5c5af6e86126788ccf9a6d9db85485bf7ee1cbb167e1ec62f8",
+    "configs/softmax_lookahead/e061_R2_LA_openwebtext_d256_s71021.json": "0d28a3c3630beec8a4d3595f5060fa375cab007e9070f01fa0741fd7c2a68160",
+    "configs/softmax_lookahead/e061_H1_LA_tinystories_d64_s70021.json": "b4ac9e9b78cd0ad29ce1ea13f383e4c27d7e9e35d2834badadd882979f2733d4",
+    "configs/softmax_lookahead/e061_R2_LA_tinystories_d64_s70021.json": "092d10c16f7f2e2238ea89d68e56757529790b97f79928fa94a31e6da0f9a20f",
+    "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71022.json": "733bcf3fee6a6fbc03f50ee8c428b31264ef42edeced6c65f2c356552d65002f",
+    "configs/softmax_lookahead/e061_H1_LA_openwebtext_d256_s71022.json": "26caf7b0bdfc7f2c3ec8ce38d82f954246b260c5220420bdb7c3ab45be217d73",
+    "configs/softmax_lookahead/e061_R2_LA_tinystories_d256_s70022.json": "c9f284cfe2256ff1c7973deb66f6dbed044eaf44d19c12226c7d0265e0dcdee5",
+    "configs/softmax_lookahead/e061_H1_LA_tinystories_d256_s70021.json": "633a1ad73defb42963eb72f59233c2bae120a2ad183b0d4a7247abd7a280c6e2",
+    "configs/softmax_lookahead/e061_R2_LA_openwebtext_d64_s71024.json": "fe27cb443ebd9b83782e64ebfec82da5e567e1c5ee9599250df83eb3723054c0",
+    "configs/softmax_lookahead/e061_H1_LA_openwebtext_d64_s71024.json": "334669d11cec031b26f591da5b049b37d506903b569924c5064eda3ca004edba",
+    "configs/softmax_shapes/s3_H0_0.json": "98d633c666077ac2208a02262e6d92e926ab6763afd435c0abe7dbaa068383c6",
+    "configs/softmax_shapes/s1_R2_0.json": "23384d798bca21adc744fbe515a4c160db1dee3a43f08f989318af2e33f7afa0",
+    "configs/softmax_shapes/s4_Y_1.json": "e7fa1f341f92941f63c93f396a69fede0a729ab0d6ca0d76d1a10bcdeb9a30db",
+    "configs/softmax_shapes/s2_R2_2.json": "b01c71716c33ebee89e70843d81fcd9e8ddbd23c2c876bde9b81b3f9bc557f0f",
+    "configs/softmax_shapes/s5_Y_1.json": "b56d3a473d40fad3230dad61101193b559db07cdfdab99ca820441299fd85765",
+    "configs/softmax_shapes/s0_H0_2.json": "15e147a64e85c5c6ab285a4653e0b0a9d61b27390762dd574224e5ca95880a9b",
+    "configs/softmax_shapes/s7_H1_1.json": "67046e2756b52fdef5a174d5da25ecd4dcb9ab5c1a4166e2a734815f02a2055a",
+    "configs/softmax_shapes/s2_H1_2.json": "0917b2d6604209c2956bc2666c6dc3c6a492736e3b5c6a35a03747c54ee5b6d3",
+    "configs/softmax_shapes/s6_B_1.json": "69c4d86e3896553170d47377e560c4a173bee3c68f87c060aa5d3b24c9561db6",
+    "configs/softmax_shapes/s7_B_1.json": "59118e400db35b53d031e95b92be198310f1dbf9522cf4993b421bbf70d8834c",
+    "configs/softmax_shapes/s1_H1_0.json": "59a82860143a1b6ef4c2f4d8f7e8ce119c8e9488b94889d9b11bad1064b59acf",
+    "configs/softmax_shapes/s5_H0_1.json": "197efdc76e01ad8cb73a1ef3c0ae58dc57d14cf468b51848eb7993b2344b7a52",
+    "configs/softmax_shapes/s7_R2_1.json": "e13a23af61acff42314e366685f35d93bccb7f63f780412859b4bd167d967458",
+    "configs/softmax_shapes/s4_R2_2.json": "7de34bd5dc79b5e5e65c3f0828bc5e118da42b83a3b05ea47cf87f96c5c15d88",
+    "configs/softmax_shapes/s6_H0_2.json": "20b56154b469275e9203fd0c8095d46b6a14b6ca01065547c616af0f904f4142",
+    "configs/softmax_shapes/s5_H0_0.json": "9cb3721b84da66d1e5b13fa1420739334b7d03a053d4d2c83fb36d3618ad996d",
+    "configs/softmax_shapes/s7_R2_0.json": "5f434ba54a91fc7199fcb821d9da0e83f49dd461d8eb8e96257534119b7463eb",
+    "configs/softmax_shapes/s1_H1_1.json": "f81c26a37882b9620b6251f547f99e8c398b627e380a58a1f5a682e27cad82cf",
+    "configs/softmax_shapes/s6_B_0.json": "5df8cc53ddee3b78cffd6f6032a6b33f5127392b41eea745d81cc71eca823279",
+    "configs/softmax_shapes/s7_B_0.json": "b3a60b6ca0e4ca2453877f4fbebbf206b9f652b75e5d8f299a0a7554f4996d66",
+    "configs/softmax_shapes/s1_Y_2.json": "2d8d5ecd97294f65e95e5121ce4ae75d4b2ef792df89cdc323c1e5095863fcad",
+    "configs/softmax_shapes/s0_Y_2.json": "fd25cf17048fac07ef63a183878203c64ef882451f8a36ba8e1df4c25585938f",
+    "configs/softmax_shapes/s7_H1_0.json": "539950a1bf5b92de5183e1a4c458a59066389942bc21d2e8889fe4509fd6dce9",
+    "configs/softmax_shapes/s4_H1_2.json": "79ae3d14c879c332b07d9f1f31e3a2555fab2194068dc012e37485468aa91f09",
+    "configs/softmax_shapes/s4_Y_0.json": "72bdcb1a2a6cee74284bd5940c994dfc0dcf6a3514fa1632b037d08c4375dd9d",
+    "configs/softmax_shapes/s5_Y_0.json": "4bf1753d3564e16d37e6205eb5096259aad223bd2f6ccad45e3c666b45a0986d",
+    "configs/softmax_shapes/s3_H0_1.json": "45147bb89bf35b29864345df6b9805b28622439fbe3d1a879b94e3265044630c",
+    "configs/softmax_shapes/s1_R2_1.json": "fe1588a3229d11004f3947855d1a85e2877a135a780b58339b02c06f61f5105b",
+    "configs/softmax_shapes/s3_B_2.json": "57657adc29d2ba8c40c8ca89f9bf55c524b1bb5929a8b7ffbf43860570c2b5c9",
+    "configs/softmax_shapes/s2_B_2.json": "26cd503d4020c994ad6e7ccdef99c65ee7904aaca410e70bda427f36b7ea901e",
+    "configs/softmax_shapes/s1_B_0.json": "8de8644759a0e060c117bece05d074c154fc8273be5c7abfdb32c5022b405998",
+    "configs/softmax_shapes/s0_B_0.json": "846363a0ab08695c456e38791acfcadc7ad03eee5f825579b38b8457be210208",
+    "configs/softmax_shapes/s6_H1_1.json": "567ee21fc8e213019722e0e0ba2201d2b664e1ef469cafdcef9438d088b90b94",
+    "configs/softmax_shapes/s6_Y_2.json": "eb4a93953ab81e19bd5a004637bbb4f9cdde25560401312b037f76aefb0955b9",
+    "configs/softmax_shapes/s7_Y_2.json": "3ae32c4a248d8b5449fb8a160b384e627ab79229662969dc4c86a129aa16a77b",
+    "configs/softmax_shapes/s2_H0_0.json": "34e3c9682ded76693f3cee4e35b582d6ababac8edb0b04cb5896a4f5d5959eb3",
+    "configs/softmax_shapes/s0_R2_0.json": "36f5852bc7b9b963ec17cd720976482d91ff4bffbc743cf31f2e92d2d19dbc94",
+    "configs/softmax_shapes/s3_R2_2.json": "1afba4993f70d32ccc4c38abe85b2c492317e4a0d406657904c93ecea9f9fb5e",
+    "configs/softmax_shapes/s1_H0_2.json": "94cca1e003f972c8f9f63b84bd6fa70bb7cce6245a7d2377262a05d0fa9ff835",
+    "configs/softmax_shapes/s3_Y_0.json": "34d8a0848b15ed94e24490c8adb19802fceaa5827f47b9e784d93d78b6fb25c7",
+    "configs/softmax_shapes/s2_Y_0.json": "43f7cfa805710f0e36f6656084746084bba6f48a316918cd22106a21ebe0456c",
+    "configs/softmax_shapes/s4_H0_1.json": "613e9b6716ef44e0bf711fa320d9256aab918fb318d1180bd97455873b1c97bb",
+    "configs/softmax_shapes/s6_R2_1.json": "b690e86811903291b7b7f0c9639965cf6a7446748d45bb0341602055050ee58d",
+    "configs/softmax_shapes/s4_B_2.json": "7c7f4823b754a80b388d474a9db347e0182c905677e8cab56f5149e326846714",
+    "configs/softmax_shapes/s5_B_2.json": "7d5ea4a3c83ee0e1c373ba05941b6a3906f1df7f0d23db74787ea8823fb9df8b",
+    "configs/softmax_shapes/s3_H1_2.json": "dfa531bbb2878b752487ffc4fbb40dab531227e615b42e01100930a2ae4d1544",
+    "configs/softmax_shapes/s0_H1_0.json": "3f0b555a570c8e31a6b09864a1c8c9afda70b214547953d7db248ea267564fca",
+    "configs/softmax_shapes/s0_H1_1.json": "e7c4b7a7b5b9b85654210ad605f1e9b8cd90df9b81e0d5cd938073dd1076b3a8",
+    "configs/softmax_shapes/s5_R2_2.json": "13721cc61254129286221502a8c351145600b02b453172849ef8aca64a9bbf4d",
+    "configs/softmax_shapes/s7_H0_2.json": "552df386bdb1d71ea561494683b2576fb117ce435bbd3e1340b8d68c639f480f",
+    "configs/softmax_shapes/s4_H0_0.json": "c04423e23917d49366ca7e00b07f5915d1877e068b43f33b439b8fb4951de599",
+    "configs/softmax_shapes/s6_R2_0.json": "e2e24f866141bd6ebe5ec8ab00d47832b7db6ec213c4fd1c8b9b8ccdcba76177",
+    "configs/softmax_shapes/s3_Y_1.json": "d902067cb27debe051705df8ef24029e669523bc8bddc3288dd34f375287cb49",
+    "configs/softmax_shapes/s2_Y_1.json": "5f575c49cea814dec57aeb00462e47108f3088453750b55e6cd1c9516da20a9e",
+    "configs/softmax_shapes/s2_H0_1.json": "78afcc75ffefdabf4124531027b9bf4c5987ac1464d023736bc0e0c34c170530",
+    "configs/softmax_shapes/s0_R2_1.json": "19ec752a04d32ce284fa8a74502515f66438f408e41dde1387713600148fe8c5",
+    "configs/softmax_shapes/s6_H1_0.json": "365cee8e8d85f85e508153cfac2815ca3343a0e0fe681280ea1d75ccb5b2a73a",
+    "configs/softmax_shapes/s5_H1_2.json": "c9e7a259b20eb49166167d4837b57a39fe3f118f211a785f955854ee96680722",
+    "configs/softmax_shapes/s1_B_1.json": "bdd29f86b0d5a39e83bc73b178f61316e71509e44dc7c738e30cc64ae2b1f43d",
+    "configs/softmax_shapes/s0_B_1.json": "ab4f233e74ccab44df72b79cd060bc08bcdc954df6eb35eed9208bd124f9479f",
+    "configs/softmax_shapes/s1_H0_0.json": "80c5241d8f50e83acc910b4109520dc6b27178aadb9bd70497e366e3a14ed66d",
+    "configs/softmax_shapes/s3_R2_0.json": "ea904d6c5f3e53499c1462a403d636eefea72f9f9df0a19ac7d7df3861856431",
+    "configs/softmax_shapes/s0_R2_2.json": "0c4be15fca67dcda565a5e98c0ecc0536e778ac614356113a134655a3fb25b6d",
+    "configs/softmax_shapes/s2_H0_2.json": "e9814a81cd72c355bd184d6b4d0041b26f7fb8413764e1c4bc0862e193e8c68f",
+    "configs/softmax_shapes/s7_Y_0.json": "de919362e0181652c628f493d4d546e6503930cfab2ce0b16b640c9ba611ae98",
+    "configs/softmax_shapes/s6_Y_0.json": "eddb1d1dcbb9d14daa4d80d8658fc38036978d2d958f78785f40eb50b4a4cf9d",
+    "configs/softmax_shapes/s5_H1_1.json": "5e2c2ab610405395406feb3227a527cd146f575d8a6abc4db0a82b3dd920758d",
+    "configs/softmax_shapes/s0_B_2.json": "576be7f904d9a2a83f4ae371de8fe4849ced729bdd1f4edda4fa890b2fbcbccc",
+    "configs/softmax_shapes/s1_B_2.json": "fc4610624e0a658dedac4455bbda070b4a751b45b65ca62fd77eddb4a9b7a325",
+    "configs/softmax_shapes/s0_H1_2.json": "a87e040db36f07c79b34540fb93676e426574e7cd16eacb0df6e4c1103dd09bf",
+    "configs/softmax_shapes/s3_H1_0.json": "564278e01060f28d5b14c5a82289c5c60ad33a0db49c5872dc39dd6c43f5a77c",
+    "configs/softmax_shapes/s5_B_0.json": "51f04311e2dbf93be31dcf9a3c9d7a9035367c6d248dffe72f1f9898d518c12a",
+    "configs/softmax_shapes/s4_B_0.json": "7ce3b333f94de8d8098e839756838f04a981b507ebce47d2b69ca6f816e0fee8",
+    "configs/softmax_shapes/s7_H0_1.json": "6a6bbeb05488ff4785e714962da03b4c41054c1f8e754c7358aa9d897e785f34",
+    "configs/softmax_shapes/s5_R2_1.json": "7ca5b9a5d37115a9bc585e6f75d331fa282b08319b8dddd0c6017cdedc81c445",
+    "configs/softmax_shapes/s2_Y_2.json": "d23428d4ae4e2db92da2a1e2e5acb1904ad557f49ee2ac6bded7f7dcabfcdad5",
+    "configs/softmax_shapes/s3_Y_2.json": "76b5a00901184ed2cce6600264424793988028d69b239e73b697c1e665947160",
+    "configs/softmax_shapes/s6_R2_2.json": "d5d580d22b6eaf51c3f106c5311bf5a2680bb05768b8a619ad4ccabc48803339",
+    "configs/softmax_shapes/s4_H0_2.json": "5dba75ac87b0f2e708fbede2c9a521cfb27cdc61375ca982d654cc081f2a49df",
+    "configs/softmax_shapes/s7_H0_0.json": "0b00a7cc0bd7899afdc2d43188f8834f363bd5fad8776a4252c92a4bcf2454d2",
+    "configs/softmax_shapes/s5_R2_0.json": "9933f11d75acb395afd95ab7af976899c24e40e85708802011a957d6fbe5ccff",
+    "configs/softmax_shapes/s5_B_1.json": "a90f0cd7eceec5f7e0070962cfed04f9666e804c0f4eee4fa426359a096a7e91",
+    "configs/softmax_shapes/s4_B_1.json": "14cc8bb033dba09745734c94af2babd7cc3bdafaef15c77ae9ac91ef66774eed",
+    "configs/softmax_shapes/s3_H1_1.json": "d436391654b5f180fc4c327159e24b6fbc02602a5a4b02031769dfb29acb4dd4",
+    "configs/softmax_shapes/s5_H1_0.json": "27a45e0b1fd23f7b725efac8fcf36700f2a456856f130ebb82c7a45f1d74812a",
+    "configs/softmax_shapes/s7_Y_1.json": "47943716c6234b7d01fbe6478e7c1e6a1991c658195d69317d3adfccdbaec4bb",
+    "configs/softmax_shapes/s6_Y_1.json": "24d4badf9fa8870ebd2e957c9834f574773d73985d14189e3deb880f13ee08d2",
+    "configs/softmax_shapes/s6_H1_2.json": "f30940dad7f86ebe7dea500eef2d0279a432ecf3136b809bddfc8fb2142e71bb",
+    "configs/softmax_shapes/s1_H0_1.json": "f502b07b1ac5d81a5d3aaffb71ccc289d62f4e4ff9d2c262b2a51dfe0869a9bc",
+    "configs/softmax_shapes/s3_R2_1.json": "68c3bc2e4f9888b81ee876aa12d36884684139be26606c09111080757dd9de2c",
+    "configs/softmax_shapes/s4_H1_1.json": "a1f968c25c4d89f5fac2e6bda33f5d3e55fcab9bcc0d57829d820b58b34403dd",
+    "configs/softmax_shapes/s0_H0_0.json": "e6bf6e6731a30f3378cb246dca357560e30fee30e959bcc3e445e5649816faef",
+    "configs/softmax_shapes/s2_R2_0.json": "871e520b31ed76026c27badb8fd1b2d9ce0494a4a70a4320414fa00f44ddc536",
+    "configs/softmax_shapes/s1_R2_2.json": "f5f0c8242b223a82bec6ed049d2281691ff0247474797375ba0fb575c0c8029c",
+    "configs/softmax_shapes/s3_H0_2.json": "3beebab81aa76bcdec3693d18344f31dd2a6bb9eb858f15e6b9c5a0b3762eba5",
+    "configs/softmax_shapes/s2_B_1.json": "2de454384f05264066e4f4fe31232a9b01a9b76861a9f690dbc648b367a80239",
+    "configs/softmax_shapes/s3_B_1.json": "0d0319ac3edc449b4eedc623d24056bdbf5681a61da9cfc6afd677b85e07917f",
+    "configs/softmax_shapes/s6_H0_1.json": "098a48be8bcc651460223fe992237c1deec16ec0de5d8888916727fb4fd7026a",
+    "configs/softmax_shapes/s4_R2_1.json": "13cf2045560abab720a0e952cee7a3e71665e1ccc305c271f5d7c87658382570",
+    "configs/softmax_shapes/s1_H1_2.json": "5e0f54582895e4bea2677fd00f922e1e2826f4ce34c5d75c421a640e3a442354",
+    "configs/softmax_shapes/s2_H1_0.json": "d28cca48fac4319fe1bde2120b2f57debc5fcdecca45d94e3a9b4fa5ed92355a",
+    "configs/softmax_shapes/s0_Y_1.json": "d856c123a9ac365e61631c3ad6ebda3de18b2e399e87a644f24426ed1c27f323",
+    "configs/softmax_shapes/s1_Y_1.json": "9cb5ae8787e744b882bead0e547178b49f6db8fb2d0d996156cba9a8be6307b3",
+    "configs/softmax_shapes/s0_Y_0.json": "dbfbb859616ae34e83ce721dbd88657703ce466f0dae6ada4df73bcd6d49f19b",
+    "configs/softmax_shapes/s1_Y_0.json": "911d48c3504214a3d489fe3c8707397f9d1e8fc17d41952a4902a2afe7d3d771",
+    "configs/softmax_shapes/s2_H1_1.json": "f342672d9f4691d8222dec8f42911594b700ebd3a5cf14143e9947e992f716d9",
+    "configs/softmax_shapes/s7_B_2.json": "df3e869508c79cd07bafc7b63fffb2913a8aaf8b685ab943e989febff29c1d02",
+    "configs/softmax_shapes/s6_B_2.json": "198badad92599b5e49db59bb48f12a026a5a162a26f6d807f954bae1851dd47b",
+    "configs/softmax_shapes/s7_R2_2.json": "60a1740554850451e416a8cf1dd2d2c784f431fd9c9ef09cd8071faa004727be",
+    "configs/softmax_shapes/s5_H0_2.json": "78c8ba9d29b64263467baa0e5c2c19b047b3026016afd9b5eeb9efebe96ab2c6",
+    "configs/softmax_shapes/s6_H0_0.json": "d0e44943e84e201e08efaf53909468aff9fbe4021935e71789772c122c5c829a",
+    "configs/softmax_shapes/s4_R2_0.json": "2e56b7817852888665f472544d62a900209faab5ca55b38f40e9e1fbaece2715",
+    "configs/softmax_shapes/s2_B_0.json": "2f9c0564a10b00b25c0eccb8e2bf5c237338ec8d33f2890494c663e41761ebc2",
+    "configs/softmax_shapes/s3_B_0.json": "679c285ec619b781fcc6f8b158404dc408fa218ffc0ad9fb175a7c6a90cb4c83",
+    "configs/softmax_shapes/s5_Y_2.json": "e7b28ab5c6930024b8a55be319ef00ff7eef27f7a9b355e615086882d4b8365f",
+    "configs/softmax_shapes/s0_H0_1.json": "4248306661d367d373fc7a4c25dd24983288ffe1064b9c50216bf5ce3f190243",
+    "configs/softmax_shapes/s4_Y_2.json": "50adc6566edebd5bea233648ede12c7f70fa6da2ba8ee9ab13fb3a8869f91e9b",
+    "configs/softmax_shapes/s2_R2_1.json": "92e4fa34cdb733fa945dedd161eab8bbd63035d4225f88fd9108e973b2f66100",
+    "configs/softmax_shapes/s4_H1_0.json": "aa492eeef6794422f5d12ec3365e4c838b9e390626c8d19439b2983609121439",
+    "configs/softmax_shapes/s7_H1_2.json": "c2c87b93a84a503605a8970b57e6cbded40175dd71b161400e48ef1bbcb9a222",
+    "configs/softmax_strength/H1_eta_tinystories_s70021.json": "c1cf3622209be7e8001f88448036fe57a87c3ce3b30c31c4addb8a10b5b954d0",
+    "configs/softmax_strength/H1_eta_tinystories_s70020.json": "0ce3d57c024a79c1383543bc39ce239f7dc4bad73ece37988bd0b307a01cf714",
+    "configs/softmax_strength/H1_eta_openwebtext_s71022.json": "7a67730b770d10d74272d5174796005ec487dbce8e986bf1440d5e87eb74fea3",
+    "configs/softmax_strength/R2_eta_openwebtext_s71021.json": "79d62abcf138973a8b6b08426ae5afeff660fd6ad4367e90d46c373326f34780",
+    "configs/softmax_strength/R2_eta_tinystories_s70022.json": "ef05a679a779aa99dc6a5026766fe7d85a5309ed66f7f76ca19823969532ed93",
+    "configs/softmax_strength/R2_eta_openwebtext_s71020.json": "3c4b69440a8a2c336e469ceaa9497fad9cbe94f8d4cea0c4e816a1471c75fe7b",
+    "configs/softmax_strength/R2_eta_tinystories_s70021.json": "f235b4a04c355c57912ccdf9e794787a4c7cec97a0535453f1edea89f299980c",
+    "configs/softmax_strength/R2_eta_openwebtext_s71022.json": "1dcdb4482d9defc448483ae503a2b2b06608e1140bb6a21a6d38748c5f040d87",
+    "configs/softmax_strength/R2_eta_tinystories_s70020.json": "fd448c948bf9432ca1c14385cc63a0724891e224c0e27921c9a00ef533b47952",
+    "configs/softmax_strength/H1_eta_openwebtext_s71021.json": "9ca5c0564f99b6d88079173d3ffb8d7bff35f0ce20f5c29a81dcb68ae18e79fe",
+    "configs/softmax_strength/H1_eta_openwebtext_s71020.json": "196a514130895ff7e3f6cc28a68e219d9c6b69030c52e555cfdee8f8de215320",
+    "configs/softmax_strength/H1_eta_tinystories_s70022.json": "505eda2cd815476594ba5294757baa03ee9946e42592d4d6f7af53fadff94dd4",
+    "configs/softmax_width256/R2_tinystories_s70021.json": "4b27a055218a0d0ef364f5c6defd630b03627b4353e399fdb263c471ba833ede",
+    "configs/softmax_width256/B_tinystories_s70022.json": "eff9bc451f2a2cba98b4707b8bbc5601a1a1557f72dfbe961cae0333ec8f9aab",
+    "configs/softmax_width256/R2_tinystories_s70020.json": "3449cd332a331249ec16f609f0350d6d52d9482a449346d2449c28d89b55e7ff",
+    "configs/softmax_width256/B_openwebtext_s71020.json": "108f6633fce25c17f93da941d471ede1d077bfc774bb480637805aabd2abf093",
+    "configs/softmax_width256/R2_openwebtext_s71022.json": "e63e3dd9e304f2f40a9d6ee843b3531fb80b138ebc4697e65512834c7882b7e6",
+    "configs/softmax_width256/B_openwebtext_s71021.json": "457c604219c371a158db6aa25c7482ccae483acc38421d14b035187c87dda5d1",
+    "configs/softmax_width256/B_tinystories_s70020.json": "c16d6d086f2b540de9999fb95716aaed8473119e41e877b8d2c3d74ad86ab52f",
+    "configs/softmax_width256/R2_tinystories_s70022.json": "35244911678f702e101088d639c87796a8f896e6e96cd8fb1622beb70d5da903",
+    "configs/softmax_width256/B_tinystories_s70021.json": "37583068b99fefc758289f765a44907f8450f9d91adcb9f98d2b810248851e15",
+    "configs/softmax_width256/R2_openwebtext_s71021.json": "bc5b243303db9f6ee1969ef2020c3d21a9e607f4df359da7cf43e0723f46bb7e",
+    "configs/softmax_width256/B_openwebtext_s71022.json": "b8a25151e0231d65d0d716283bb3cf87b06ef5138a974aaffa122a99a5963c7d",
+    "configs/softmax_width256/R2_openwebtext_s71020.json": "62de69ebd733d62a224f6407379027d9bbcfb81ae558d08430561726ba732461",
+    "configs/softmax_width256/Y_tinystories_s70020.json": "7d94058b06c32633011367886e7c4ae46e49ee0794db72f33539c795453a56ea",
+    "configs/softmax_width256/H0_tinystories_s70020.json": "e6f627d5aa26638ae3fbe087bc0c6f96795f3cee9b50b08f476eb34c35ce8111",
+    "configs/softmax_width256/Y_tinystories_s70021.json": "8f41b7a910cb6147890e6703fec60e025320df076a0398e11d0713ace097478f",
+    "configs/softmax_width256/H0_tinystories_s70021.json": "92b651745dc9c6d89ba72d95c38be96d52cb362d2db886b512ab01272e757bc7",
+    "configs/softmax_width256/Y_tinystories_s70022.json": "8f59a5d0eab72f7fbaaa6a15d0544b60a588cf95eec8d24e16f891508b528f72",
+    "configs/softmax_width256/H0_tinystories_s70022.json": "e499a349d2e14673520d818978e3c05a559310a9628597063562eb83f787cbaa",
+    "configs/softmax_width256/Y_openwebtext_s71020.json": "149af8dd10754e1432e8f3c18be5a216e4b1df830252c4efaa99e1527b0fe52a",
+    "configs/softmax_width256/H0_openwebtext_s71020.json": "9cd52e3600410d3cde8a000c9e6f7f86eb861ab1cb509076827a89dbabed1658",
+    "configs/softmax_width256/Y_openwebtext_s71021.json": "4afa598ea839ba119fd770e3e81144805a972623d881ecb319e447cf6970554c",
+    "configs/softmax_width256/H0_openwebtext_s71021.json": "55e414116e4b14765d5402f1158c416d9148ed6cf8e22298a9ba55462c916221",
+    "configs/softmax_width256/Y_openwebtext_s71022.json": "bfb2b6ea97e5320c9e7152d7918ee556caf60c4e5830c2f0eef9156db7299170",
+    "configs/softmax_width256/H0_openwebtext_s71022.json": "d5406d1afee509c6e9c8bb42c699684bfec0a1f4fd4bb9001a3fc5a169c453bb",
+    "configs/linear_primary/e062_R2_L_openwebtext_s95021.json": "2aff4d6d849795b9732523236b811657253c4fa0a1275edadeacd82c5d04a652",
+    "configs/linear_primary/e062_Y_L_openwebtext_s95022.json": "a18b817ce572e0e817975ba5e85bb1e3eeaf134c6bc18f3f087ba55ae1261e00",
+    "configs/linear_primary/e062_H0_L_openwebtext_s95020.json": "4e7a205ab41f1a7033f9cdf8eb9d0c7c7108039665458afb1021b0fba042217b",
+    "configs/linear_primary/e062_H1_L_tinystories_s95020.json": "bc8f84dd816f7f4fbcce3c29ffc1c8a71255a9505404554b9347bec224abea71",
+    "configs/linear_primary/e062_R2_L_tinystories_s95022.json": "7c409c7a284806eddb8b8f2e5516cb92d216322a042121793cbdd94aa9f032fc",
+    "configs/linear_primary/e062_Y_L_tinystories_s95021.json": "32240a247d6899986a3f882972e87f24a89aa5a9450551bf9fb2315133a7408b",
+    "configs/linear_primary/e062_B_L_openwebtext_s95022.json": "730942044558d6089e7dae03f92e52335758c71d0d63affae5e8048355598343",
+    "configs/linear_primary/e062_B_L_tinystories_s95021.json": "33603c01c8a2a463c93043d8bbfdf5953266476706da7bff0344cd14104a9c2e",
+    "configs/linear_primary/e062_B_L_tinystories_s95020.json": "c8a3a163d35184cf174c7a1f43f64b10955a21776fd8faf4fd58e61b74fb6cd7",
+    "configs/linear_primary/e062_H0_L_tinystories_s95022.json": "53e99faf06cb584789a406f6fd27f362defabe4bd6d1fee78d4c588b6b27babe",
+    "configs/linear_primary/e062_Y_L_tinystories_s95020.json": "a31f9afbc7c1a96f1d8626c1f9ded209370afafa5736fd299f09c66cd789be4b",
+    "configs/linear_primary/e062_H1_L_openwebtext_s95022.json": "5f3e258b9fb5e6b5d8d7bb2192c6681e4d19c8f78e929b25e97a3c7a31b0971f",
+    "configs/linear_primary/e062_H1_L_tinystories_s95021.json": "25080e790187baad2541760e8fb9b69a2fe549d398fc72f493a3786ac48197a9",
+    "configs/linear_primary/e062_H0_L_openwebtext_s95021.json": "1a6c74f99d2ec59b1c4c2d975c2aea04930af7f31d1a7778d89c372a21cf2b20",
+    "configs/linear_primary/e062_R2_L_openwebtext_s95020.json": "f4af36de2c366012d6e0fcc3ff05b35971ffa9783802cf047d48b673f466a211",
+    "configs/linear_primary/e062_H0_L_tinystories_s95021.json": "14c1076b1396290844b5f4a82b1a2bf3ec1cb3291784f57216f908d37a655135",
+    "configs/linear_primary/e062_R2_L_tinystories_s95020.json": "38e8b25c6eb3aa3af0d5b4a8862a9c169c96414af842abf8acaee961f76512bf",
+    "configs/linear_primary/e062_H1_L_openwebtext_s95021.json": "ceee4754a1c63c5145d49e11c073a78bfd032859082a4314ffa987714d371cfe",
+    "configs/linear_primary/e062_H1_L_tinystories_s95022.json": "5d35c7114c5ecfe02b1df4d48baa88cb41350f077f30c7bc2bff749f851b3b85",
+    "configs/linear_primary/e062_H0_L_openwebtext_s95022.json": "d94b506e9ec27ea49419b58643791027943f37f85946ea28bdd19cc5ebd375b7",
+    "configs/linear_primary/e062_Y_L_openwebtext_s95020.json": "5dc4e17757382bf3e53f233f273b39ae6a28b58f986538588813a596faae5267",
+    "configs/linear_primary/e062_B_L_openwebtext_s95020.json": "6213ffc65c72a7d40b8c09e9d8593e40ceef5223b1f670e2a5835e9f33eb6c19",
+    "configs/linear_primary/e062_B_L_openwebtext_s95021.json": "9fc290d26f7b3312666350b7a8869bee1ec5bdff0c47494b142f6de162dfec7a",
+    "configs/linear_primary/e062_B_L_tinystories_s95022.json": "7fa301869b51c63febc2cd0b8f14dba4fca58287ab70b564d150930293fddc80",
+    "configs/linear_primary/e062_R2_L_openwebtext_s95022.json": "ca509b9a6693678ebfb0b8cee785d1f9e314ff8b5714d38d0b7fb3a39a61e658",
+    "configs/linear_primary/e062_Y_L_openwebtext_s95021.json": "a0daf82da6eea46ce499b8be543b6755d9d186d127529cf0589ebd381b1caf33",
+    "configs/linear_primary/e062_H1_L_openwebtext_s95020.json": "3ef9115ccd5d983908c1346cab821f00d67e4397e504e5ff98dabcd3bba32747",
+    "configs/linear_primary/e062_R2_L_tinystories_s95021.json": "4941b8fffe5a2ee931d831a53b3b9723e23952a21dc094a8259d7e65eddc69e2",
+    "configs/linear_primary/e062_Y_L_tinystories_s95022.json": "a13da32f21f43045907f833cee81c78920f3ff0599fed79cdd6ea4611e0c2254",
+    "configs/linear_primary/e062_H0_L_tinystories_s95020.json": "8cff46aa0a6b1b07a015175751c1a435d8635504cd474402072a88996eb0ae42",
+    "configs/linear_statistical_controls/e062_B_S_openwebtext_s95021.json": "dd1f2a9d3ddcd6851a95b0fa4fc87011b64e38ff59fba5f4b9fd1f6e4965ccde",
+    "configs/linear_statistical_controls/e062_B_S_tinystories_s95022.json": "4a7b41997356faef9f7ef123bb9ffbedbc1f0c7aa7876a2cf934e83612377977",
+    "configs/linear_statistical_controls/e062_Y_S_openwebtext_s95021.json": "0ce659127dbebf9b925cd88a655d89c8a44809a1d9134579ca0dca257602ad40",
+    "configs/linear_statistical_controls/e062_Y_S_tinystories_s95022.json": "ebb852d746304c58b1daaad1c221f544fb9e6539d6ff35eedc8a4455bc754f34",
+    "configs/linear_statistical_controls/e062_Y_S_openwebtext_s95020.json": "d62333a4050f02dfa1cb211386e0132509f1f3e88abc6f48b00be75d5a59c84e",
+    "configs/linear_statistical_controls/e062_B_S_openwebtext_s95020.json": "0992ae9de7c86b5f4982a55170ab811bd54d257209fb999431aeb33e5a7811a4",
+    "configs/linear_statistical_controls/e062_B_S_tinystories_s95020.json": "7ebfec91fe30a7ad8393bf83bf54c4a022d99564e7ec2d3d8c0045db4720035d",
+    "configs/linear_statistical_controls/e062_Y_S_tinystories_s95020.json": "072501a3ac6f404fd03f012b5f923dd53957d2e1ff637b273370e1ff5bbda719",
+    "configs/linear_statistical_controls/e062_Y_S_openwebtext_s95022.json": "c3fc24e6e934ed352ffe833f1d79b813e40afe53eea0117c87a0e2ceca01615f",
+    "configs/linear_statistical_controls/e062_Y_S_tinystories_s95021.json": "fa88ea3f636ca5dc40cbdef582cd4c38283454787f7bb0ee01a8ac76a4b90bc7",
+    "configs/linear_statistical_controls/e062_B_S_openwebtext_s95022.json": "496794b583c76de7c333cb02997a08f129c9a6f4c765d640de061368b59879da",
+    "configs/linear_statistical_controls/e062_B_S_tinystories_s95021.json": "3a4bb48658ff3f310cfc12d2eebd5606ff4ebdec98a6f336ee87db70f4a1660a",
+    "configs/softmax_looped/B_tied_openwebtext_s97020.json": "202994b564fa4033c8df2cb6f50985789869ee70305104e0ff9a25af65e4972e",
+    "configs/softmax_looped/B_tied_openwebtext_s97021.json": "3c7a1e2329f9b58c1f8b8e3146274a188ee16787875ddea6fb6305ce0ca83125",
+    "configs/softmax_looped/B_tied_openwebtext_s97022.json": "01fb886e0b503b3f42448d0ae62401f96026ff6ffcad583d964933d6ab7e42c3",
+    "configs/softmax_looped/B_tied_tinystories_s97020.json": "a634eca6cc57797b93540c961be1762ed6b309ca86b5a8d1f6783dd0869b867d",
+    "configs/softmax_looped/B_tied_tinystories_s97021.json": "93801bb778dfc10c3b313b5037fa44ee5ab4dc42becc7ec694663104e2700a81",
+    "configs/softmax_looped/B_tied_tinystories_s97022.json": "4a6e2a0c7efc693215c03b657710bc5498a34b721591c3bd1c0700e0338f9aa1",
+    "configs/softmax_looped/B_untied_openwebtext_s97020.json": "2b50599decee9ba7f0727a698765706714d3a95fd3223adff232898fd234303a",
+    "configs/softmax_looped/B_untied_openwebtext_s97021.json": "d6717d63482aea2750b31a62ec70b924d434b7162819f66f40103af33b6529f2",
+    "configs/softmax_looped/B_untied_openwebtext_s97022.json": "05ff5ab4c7df8cc31fe285a81a6eb1878abe2fb09f1da200579e03f97e4f9e29",
+    "configs/softmax_looped/B_untied_tinystories_s97020.json": "f55ba088e0577ba157d2a0ac12d6835670aeca50842af3526871d295c13d89d0",
+    "configs/softmax_looped/B_untied_tinystories_s97021.json": "279e5ac5dedca92c3647eb219043e6b3b411c55139dde0c95309005b3dc9133f",
+    "configs/softmax_looped/B_untied_tinystories_s97022.json": "e84a31fcfa8a49efdcf8097a595556b7cd5c899cb29f59c5ae7baedfa6cc6362",
+    "configs/softmax_looped/H0_tied_openwebtext_s97020.json": "498a06ef625d6cfaafed9fba2d51decff539a94e17dd0ea0743a6416aeb13f9c",
+    "configs/softmax_looped/H0_tied_openwebtext_s97021.json": "5f43f7877c37a1bb1b205437505ac89262b3ccadd9ab9173d9c84c849e30f135",
+    "configs/softmax_looped/H0_tied_openwebtext_s97022.json": "0ed37eb473244ed85f392a03b37f87b3692c8b6539d7e151c4f758a6a7888d3a",
+    "configs/softmax_looped/H0_tied_tinystories_s97020.json": "36ec3bcf1ec753bfaf05b6925fcce25c4d15cf123ea0a7d7ba01b18678271ce7",
+    "configs/softmax_looped/H0_tied_tinystories_s97021.json": "4b40a42916883a447494e3c5f662bd02424d983011eeacf7e7e75d1513dd5566",
+    "configs/softmax_looped/H0_tied_tinystories_s97022.json": "b92038a56d3dcc30a9c95f67dc45a552254b911522fdde4847712159b5fb18c8",
+    "configs/softmax_looped/H0_untied_openwebtext_s97020.json": "3eb037ce6509a4026363f216e005a484eb29651448c91af4b7f2375d8377d027",
+    "configs/softmax_looped/H0_untied_openwebtext_s97021.json": "6f5b00c54bbff00411f4eb49733817c404d9831a70f423813fa01f414ce4f047",
+    "configs/softmax_looped/H0_untied_openwebtext_s97022.json": "fed37f213624d51dbd9844353426ba0f60fd3caf5e8ff7c80973c262f3c868c1",
+    "configs/softmax_looped/H0_untied_tinystories_s97020.json": "0a8a9a1b46aae5daf25feb8d638062fb54056de7abb7fd0e345f269084cecc55",
+    "configs/softmax_looped/H0_untied_tinystories_s97021.json": "b6c351751b60bed335c9f1421d505d0b4b60f2d9888355605f6c4f16f749bc71",
+    "configs/softmax_looped/H0_untied_tinystories_s97022.json": "bd8dbe881c18675818255701afa883a9d8bc83f87753e2bcdce6b99a4d074e61",
+    "configs/softmax_looped/R2_tied_openwebtext_s97020.json": "ed36936bcf07b6d697d59bce396bc1f20dbbcd3eebfdb7c6102b044f32dd3d2a",
+    "configs/softmax_looped/R2_tied_openwebtext_s97021.json": "f3864678fb93d6d2898cb1e71edd96b799b2b003f430f90543b397eafcb332c6",
+    "configs/softmax_looped/R2_tied_openwebtext_s97022.json": "ed7d81ea3f42a37f9b2d34b6eb65787db0a40ac7630ca9a38280a4e690a99be8",
+    "configs/softmax_looped/R2_tied_tinystories_s97020.json": "ea804e97960826f33388d1bd6c5a731b0ca855100739512c04920e90d7fee984",
+    "configs/softmax_looped/R2_tied_tinystories_s97021.json": "7c72f0b54d0dbde8424bcea193cfbbc458a746ba840da3341b5403b2faf420f3",
+    "configs/softmax_looped/R2_tied_tinystories_s97022.json": "bcaab05a91c6f8770eb16d3e34ba00bf8bc40f048224da9ebe23883e05706ef8",
+    "configs/softmax_looped/R2_untied_openwebtext_s97020.json": "fa476feb07a04ca70a06760e36e312e11f8f5fc928e931facb85b1b6c31ec51f",
+    "configs/softmax_looped/R2_untied_openwebtext_s97021.json": "68276ed3e23b5f63757daadf6d51860c822275e707c574d2f7667e0a7ef1573f",
+    "configs/softmax_looped/R2_untied_openwebtext_s97022.json": "39a1fbec0546ebf40e62cef23026c5b5ea0ca9f31a3289f621400a2e14b3c3fe",
+    "configs/softmax_looped/R2_untied_tinystories_s97020.json": "c6d2612661524db193b9acfbbd6346b434bc2626d79e7ae8588c4e7f5633ef73",
+    "configs/softmax_looped/R2_untied_tinystories_s97021.json": "d803aabd7e3979bf3c89e036f76d814a475d190d7adf5ad856db4c726392a144",
+    "configs/softmax_looped/R2_untied_tinystories_s97022.json": "b4b97c9dc6ce8e29282333f65c59b729411f655e023822f5c38381f5ef5a602d",
+    "configs/softmax_looped/Y_tied_openwebtext_s97020.json": "ccf09a3655094f28957c530b0cab1227101b64dbe7449ac370f5fbb94975170a",
+    "configs/softmax_looped/Y_tied_openwebtext_s97021.json": "290af688ac4f9437a15e92f758b5adb72c697e78eeff03cf390e94a9167b97d3",
+    "configs/softmax_looped/Y_tied_openwebtext_s97022.json": "c2766403fe8a99583dfa8cef12ee9e5a7ff97dd39fdaf90925626dcd37851f86",
+    "configs/softmax_looped/Y_tied_tinystories_s97020.json": "f54560b29ff9f3758bbeac46a4ae9c9aca46e6d70e2dcc578a4334521c82e346",
+    "configs/softmax_looped/Y_tied_tinystories_s97021.json": "e37ff889f855af39dddc0b5103955d6649c52811a3601251dff2a40edcc3032e",
+    "configs/softmax_looped/Y_tied_tinystories_s97022.json": "884130dba0fd3b47f18e484b74fa4981b1ee35f0cdc48b9d0adbad50108c6dea",
+    "configs/softmax_looped/Y_untied_openwebtext_s97020.json": "4ebc8d3b6011e68007f9a48dfb82d627fa37c8a5f2546676b1689bd1a517e38e",
+    "configs/softmax_looped/Y_untied_openwebtext_s97021.json": "0274978ef7437ca57e17231539976cdc7f5ce84e2224630ee8e03fecc71908bb",
+    "configs/softmax_looped/Y_untied_openwebtext_s97022.json": "427ff34b6755b7c77e829212ad8b06d3321e3954bab9638cbeed579f7ed48ca6",
+    "configs/softmax_looped/Y_untied_tinystories_s97020.json": "6d95b2422989b5a5d0f8be33bd696f394d691853a76e20ac2e71eb0cd5fcaf6c",
+    "configs/softmax_looped/Y_untied_tinystories_s97021.json": "f6be933b7af931d06c80584d6a9161d6911c6c2d86f30ae177555e85d8ee6da0",
+    "configs/softmax_looped/Y_untied_tinystories_s97022.json": "43822a793d4ae606fb182d1117805eaa109ea4f2d793ed4dba355a80dcc802d9"
+  },
+  "publication_changes": {
+    "looped": {
+      "source_lock_sha256": "962be6c757d06485ef1824c92ae469e231f9ec5f6e27317eefab20bb58feb494",
+      "changes": "Private Slurm approval gate removed; passive Observer class extracted unchanged; model/optimizer/sampler/schedule/update/diagnostics/checkpoint math unchanged. Physical manifest hash/mtime guard added before model construction; numerical replay ignores only positive observer optimizer clocks."
+    }
+  }
+}

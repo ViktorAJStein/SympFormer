@@ -18,3 +18,19 @@
 # Reproducibility, analysis, plotting, and verification code
 !/scripts/
 !/scripts/*.py
+
+# Reviewed v4 code, fixed protocol presets and dependency fingerprints only
+!/paper_v4/
+!/paper_v4/**/
+!/paper_v4/**/*.py
+!/paper_v4/protocols.json
+!/paper_v4/configs/
+!/paper_v4/configs/**/
+!/paper_v4/configs/**/*.json
+!/paper_v4/**/pyproject.toml
+!/paper_v4/**/uv.lock
+!/paper_v4/README.md
+/paper_v4/**/.venv/
+/paper_v4/**/__pycache__/
+/paper_v4/**/runs/
+/paper_v4/**/artifacts/

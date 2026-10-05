@@ -1,381 +1,87 @@
 # SympFormer
 
-Code for training and comparing transformer variants with classical, accelerated, and presymplectic-style attention updates.
+Reproducible code for geometry-inspired, strictly causal language-model updates.
 
-The repository currently contains:
-- a baseline GPT-style causal language model,
-- an implementation of the [Yuriiformer](https://arxiv.org/abs/2601.23236) (Zimin et al, 2026) architecture, specifically the Lie-Trotter Nesterov acceleration,
-- several softmax-attention presymplectic / Euler / higher-order variants,
-- several linear-attention analogs,
-- dataset preprocessing scripts for TinyStories and OpenWebText,
-- a training script with checkpointing, metric logging, and optional text sampling,
-- plotting and batch-job helper scripts.
+## Current paper experiments (arxiv_v4)
 
+**Start with [`paper_v4/README.md`](paper_v4/README.md).** This is the implementation
+map for the current manuscript's *Discretizations and numerical results* and
+*Implementation details* sections (synchronized October 5, 2026).
 
-# Currently under construction!!
----
+The paper compares:
+
+- **B:** native residual attention/MLP Transformer, not a momentum control;
+- **Y:** Yuriiformer with learned initial velocity and attention/MLP look-ahead;
+- **H0:** attention look-ahead disabled, MLP look-ahead retained;
+- **H1:** coordinate connection-proxy correction;
+- **R2:** half-corrected position and fully corrected velocity, both using the
+  shared velocity LayerNorm;
+- the explicitly separate attention-look-ahead variants and signed-linear
+  attention counterparts.
+
+The implemented connection is a **causal multi-head proxy**, not an established
+Levi--Civita connection of the complete normalized decoder. R2 does not imply
+second-order accuracy of the full layer or exact symplecticity.
+
+### Quick start
+
+Use [uv](https://docs.astral.sh/uv/) for the environment:
+
+```bash
+uv sync --frozen
+uv run python paper_v4/verify.py --out /tmp/sympformer-v4-checks
+uv run python paper_v4/run.py --list
+```
+
+Generate GPT-2-tokenized `uint16` data with manifest sidecars, outside the repo:
+
+```bash
+uv run python preprocess_tinystories.py --out_dir "$DATA_DIR" --seed 1337
+uv run python process_openwebtext.py --out_dir "$DATA_DIR" --seed 1337 --val_fraction 0.005
+```
+
+Preview a paper run, then add `--execute` to train in your allocated environment:
+
+```bash
+uv run python paper_v4/run.py \
+  --config configs/softmax_primary/R2_tinystories_s70020.json \
+  --data-dir "$DATA_DIR" --out-dir "$OUTPUT_DIR" --device cuda
+```
+
+Presets use FP32 without TF32 and AdamW, not the older root-level bfloat16/Muon
+campaign defaults. All paper studies here are approximately **100M-token
+scale-local diagnostics**. Equal tokens do not mean equal parameters or compute.
+The completed width256/100M tied-versus-untied looping study is included in the
+latest v4 section. The prospective 1B-token campaign is separate and is not
+presented as a completed paper result here.
+
+## Results and interpretation
+
+At width64/context128/five seeds, softmax R2 has the lowest descriptive mean NLL
+on both datasets. Its matched H0 differences are **not significant under the
+reported paired tests**; improvement over full Y alone is not isolated correction
+attribution. In the context512/three-seed linear study, R2 improves on the linear
+residual baseline on OpenWebText, but neither correction passes the original
+Holm20 family against H0. See the protocol-specific tables and limitations in
+[`paper_v4/README.md`](paper_v4/README.md); never pool these studies.
 
 ## Repository layout
 
-```text
-README.md
-model.py                  # model definitions and attention/update-rule variants
-train.py                  # training loop, evaluation, checkpointing, text sampling
-data.py                   # dataset loading + deterministic token block iterator
-preprocess_tinystories.py # downloads/tokenizes TinyStories into .bin files
-process_openwebtext.py    # downloads/tokenizes OpenWebText into .bin files
-plot_compare.py           # compare runs from their metrics.csv files
-```
-
----
-
-## Requirements
-
-At minimum:
-- `Python 3.10+`
-- `PyTorch`
-- `NumPy`
-
-For dataset preprocessing and decoded text sampling:
-- `tiktoken`
-- `datasets`
-
-For plotting:
-- `matplotlib`
-
-A minimal setup is:
-
-```bash
-pip install torch numpy tiktoken datasets matplotlib
-```
-
-If you train on a GPU, install a PyTorch build compatible with your CUDA setup.
-
----
-
-## Data format
-
-Training expects tokenized binary files in `uint16` format:
-
-```text
-data/<dataset>_train.bin
-data/<dataset>_val.bin
-```
-
-The training script constructs paths as
-`<data_dir>/<dataset>_train.bin` and `<data_dir>/<dataset>_val.bin`,
-so the dataset name passed to `--dataset` must match the filename prefix.
-
-Supported dataset names in `train.py` are currently:
-- `tinystories`
-- `openwebtext`
-
----
-
-## Preprocessing
-
-### TinyStories
-
-This downloads `roneneldan/TinyStories` via Hugging Face `datasets`, tokenizes with the GPT-2 BPE from `tiktoken`, appends the end-of-text token, and writes:
-
-```text
-data/tinystories_train.bin
-data/tinystories_val.bin
-```
-
-Run:
-
-```bash
-python preprocess_tinystories.py --out_dir data
-```
-
-For a smaller smoke test:
-
-```bash
-python preprocess_tinystories.py \
-  --out_dir data \
-  --max_docs_train 1000 \
-  --max_docs_val 200
-```
-
-### OpenWebText
-
-This downloads the single `train` split of `Skylion007/openwebtext`, uses a deterministic validation split controlled by `--val_fraction`, tokenizes with GPT-2 BPE, and writes:
-
-```text
-data/openwebtext_train.bin
-data/openwebtext_val.bin
-```
-
-Run:
-
-```bash
-python process_openwebtext.py --out_dir data --val_fraction 0.005
-```
-
-For a smaller smoke test:
-
-```bash
-python process_openwebtext.py \
-  --out_dir data \
-  --val_fraction 0.005 \
-  --max_docs_train 5000 \
-  --max_docs_val 500
-```
-
----
-
-## Training
-
-### Minimal example
-
-After preprocessing TinyStories:
-
-```bash
-python train.py \
-  --data_dir data \
-  --dataset tinystories \
-  --arch baseline \
-  --out_dir out \
-  --plot
-```
-
-This creates a run directory inside `out/`, logs losses to `metrics.csv`, and saves checkpoints.
-
-### Example: accelerated / presymplectic variant
-
-```bash
-python train.py \
-  --data_dir data \
-  --dataset tinystories \
-  --arch presymp \
-  --out_dir out \
-  --n_layer 4 \
-  --n_head 4 \
-  --n_embd 64 \
-  --block_size 128 \
-  --batch_size 6 \
-  --grad_accum_steps 12 \
-  --max_steps 1000 \
-  --eval_interval 100 \
-  --eval_batches 20 \
-  --peak_lr 3e-4 \
-  --presymp_h 0.3 \
-  --learn_h 1 \
-  --learn_xi 1 \
-  --eta_learnable \
-  --eta_mode loglin \
-  --eta_log_init 3 \
-  --eta_lin_init 1e-4 \
-  --eta_clip 12 \
-  --plot
-```
-
-### Example: linear-attention variant
-
-```bash
-python train.py \
-  --data_dir data \
-  --dataset openwebtext \
-  --arch lin_presymp \
-  --out_dir out \
-  --n_layer 4 \
-  --n_head 4 \
-  --n_embd 64 \
-  --block_size 128 \
-  --batch_size 6 \
-  --grad_accum_steps 12 \
-  --max_steps 1000 \
-  --eval_interval 100 \
-  --eval_batches 20 \
-  --peak_lr 3e-4 \
-  --presymp_h 0.3 \
-  --eta_learnable \
-  --eta_mode loglin \
-  --eta_log_init 3 \
-  --eta_lin_init 1e-4 \
-  --eta_clip 12 \
-  --plot
-```
-
----
-
-## Architecture options
-
-The `--arch` flag in `train.py` currently supports:
-
-### Softmax-attention family
-- `baseline`
-- `yurii_lt`
-- `presymp`
-- `presymp_euler`
-- `presymp_exp_euler`
-- `presymp_ab2`
-- `presymp_etd_ab2`
-- `presymp_strang`
-- `plain_euler`
-
-### Linear-attention family
-- `lin_baseline`
-- `lin_yurii`
-- `lin_euler`
-- `lin_presymp`
-- `lin_exp_euler`
-- `lin_ab2`
-- `lin_etd_ab2`
-
-The baseline path instantiates a GPT-style model. The remaining options select alternative attention / update-rule blocks implemented in `model.py`.
-
----
-
-## Important training arguments
-
-Common model-size arguments:
-
-```bash
---n_layer
---n_head
---n_embd
---block_size
---vocab_size
---dropout
---bias
-```
-
-Common optimization/logging arguments:
-
-```bash
---batch_size
---grad_accum_steps
---max_steps
---warmup_steps
---peak_lr
---min_lr_ratio
---eval_interval
---eval_batches
---log_interval
---out_dir
---run_name
---resume
---device
---plot
-```
-
-Sampling / qualitative inspection:
-
-```bash
---sample_interval
---sample_max_new_tokens
---sample_prefix_tokens
---sample_prompt
---sample_temperature
---sample_top_k
---sample_do_sample
---sample_eos_token_id
-```
-
-Presymplectic / accelerated settings include, among others:
-
-```bash
---presymp_h
---presymp_xi
---presymp_t0
---learn_h
---learn_xi
---eta_learnable
---eta_mode
---eta_log_init
---eta_lin_init
---eta_clip
---scalar_lr_mult
---no_mlp
-```
-
-For the exact and most up-to-date list, run:
-
-```bash
-python train.py --help
-```
-
----
-
-## Outputs
-
-Each run is written to a per-architecture subdirectory:
-
-```text
-<out_dir>/<arch>/
-```
-
-or, if `--run_name` is set:
-
-```text
-<out_dir>/<arch>_<run_name>/
-```
-
-Typical outputs are:
-
-```text
-metrics.csv
-best_<arch>.pt
-final_<arch>.pt
-loss.png            # when --plot is enabled
-```
-
-`metrics.csv` contains training and validation losses, along with additional run metadata such as learning rate, wall-clock time, cumulative tokens, and, for some architectures, learned step-size/damping statistics.
-
----
-
-## Comparing runs
-
-Use `plot_compare.py` to compare several training runs via their `metrics.csv` files.
-
-Example:
-
-```bash
-python plot_compare.py \
-  --runs out/baseline out/yurii_lt out/presymp \
-  --labels baseline yurii presymp \
-  --xaxis step \
-  --out compare_loss.png
-```
-
-Available x-axes are:
-- `step`
-- `wall`
-- `tokens`
-
-The script can also emit a LaTeX summary table:
-
-```bash
-python plot_compare.py \
-  --runs out/baseline out/presymp \
-  --labels baseline presymp \
-  --xaxis wall \
-  --out compare_wall.png \
-  --latex_table \
-  --latex_caption "Validation loss comparison."
-```
-
----
-
-## SLURM scripts
-
-The repository includes:
-- `job.job` for softmax-attention comparisons,
-- `job_lin.job` for linear-attention comparisons.
-
-These are examples, not generic launchers. You will likely need to adapt:
-- working directories,
-- Conda environment name,
-- dataset choice,
-- resource requests,
-- output directory names,
-- model and optimizer hyperparameters.
-
----
-
-
-## Acknowledgements
-
-This code uses GPT-2 tokenization via `tiktoken` and dataset loading via Hugging Face `datasets`.
+| Path | Purpose |
+|---|---|
+| `paper_v4/` | Reviewed frozen runtimes, explicit presets, correctness checks and plotting for current paper experiments |
+| `model.py`, `train.py`, `data.py` | Earlier general experimental implementations; not the v4 protocol entry point |
+| `scripts/` | Earlier verification/analysis/particle utilities |
+| `configs/` | Earlier pilot/core presets; not interchangeable with `paper_v4/configs/` |
+| `particle_schemes.py`, `particle_acceleration_benchmark.py` | Particle-system diagnostics, not decoder benchmarks |
+
+The v4 runtimes are isolated so older checkpoints and experimental paths remain
+available without silently changing their meaning. The snapshots share byte-identical
+core modules through relative symlinks. Use a symlink-capable checkout (Linux/macOS).
+Historical global-Hamiltonian, PE and old linear-discretization routes are distinct
+from the architectures and protocols documented for v4.
+
+Checkpoints are trusted pickle inputs: load only your own or independently trusted
+files. Datasets, checkpoints, raw runs, logs, research notes, manuscripts and job
+scripts are not distributed as part of this update. No cluster credentials or
+cluster-specific launch instructions are required by the paper entry point.
