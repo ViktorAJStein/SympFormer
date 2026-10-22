@@ -1,7 +1,7 @@
 [project]
 name = "sympformer"
 version = "0.1.0"
-description = "Correctness-first experiments for causal geometry-inspired transformers"
+description = "Reproduction code for the submitted SympFormer paper experiments"
 requires-python = ">=3.10"
 dependencies = [
     "datasets>=2.20",

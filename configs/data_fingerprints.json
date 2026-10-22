@@ -1,0 +1,18 @@
+{
+  "tinystories_train.bin": {
+    "bytes": 947984472,
+    "sha256": "66c5c49a38ebcab576854f2f58fad55e06b2bb29ecbc34fa421910e4beb37500"
+  },
+  "tinystories_val.bin": {
+    "bytes": 9531836,
+    "sha256": "f0d47c000fdf2f7fbae1159832002b079a338cfde9ce4c5f65413da68386f5be"
+  },
+  "openwebtext_train.bin": {
+    "bytes": 17990475896,
+    "sha256": "f544963b0a6ded591474d86f609a25efeacbba4d27e7496a58aecd6891f5a8cc"
+  },
+  "openwebtext_val.bin": {
+    "bytes": 89558294,
+    "sha256": "ec660c48c952abd8011a9f61dac7ed5fb86cb497ce6ea33fa28fb424e04df20e"
+  }
+}

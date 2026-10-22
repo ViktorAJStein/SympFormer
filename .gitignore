@@ -1,36 +1,20 @@
-# Ignore everything by default. Only explicitly allow public repository files.
+# Public allowlist: data, checkpoints, results and private research never belong here.
 *
-
-# Repository metadata and public documentation
 !/.gitignore
 !/README.md
-!/LICENSE
 !/pyproject.toml
 !/uv.lock
-
-# Core source code
-!/*.py
-
-# Model and training configurations
+!/run.py
+!/analyze.py
+!/plot.py
+!/preprocess_tinystories.py
+!/process_openwebtext.py
+!/sympformer/
+!/sympformer/*.py
 !/configs/
 !/configs/*.json
-
-# Reproducibility, analysis, plotting, and verification code
-!/scripts/
-!/scripts/*.py
-
-# Reviewed v4 code, fixed protocol presets and dependency fingerprints only
-!/paper_v4/
-!/paper_v4/**/
-!/paper_v4/**/*.py
-!/paper_v4/protocols.json
-!/paper_v4/configs/
-!/paper_v4/configs/**/
-!/paper_v4/configs/**/*.json
-!/paper_v4/**/pyproject.toml
-!/paper_v4/**/uv.lock
-!/paper_v4/README.md
-/paper_v4/**/.venv/
-/paper_v4/**/__pycache__/
-/paper_v4/**/runs/
-/paper_v4/**/artifacts/
+!/tests/
+!/tests/*.py
+!/docs/
+!/docs/*.md
+!/docs/SOURCE_PROVENANCE.json

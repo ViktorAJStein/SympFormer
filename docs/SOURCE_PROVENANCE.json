@@ -1,0 +1,423 @@
+{
+  "manuscript_overleaf_commit": "c9ce8f42152e942b8ed80f55f480677ab5c0a04e",
+  "scope": "Submitted three numerical tables only; no deferred1B or old diagnostic studies",
+  "definitions": [
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "inv_softplus",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "84a52b895409cdee80f7cc7f0d6d752ff8532351d40c6a7b7790f13e54cc962f",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "inv_sigmoid",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "fdbd4bf19778049e3c5686515f418efed906cbc64179aad393a4b1dfe2f69195",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "ModelConfig",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "9f5b8fad1ddda135a2b7328c6ed9d9b294737995466f1400ce119c0256fe8077",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "causal_mask",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "ecacfd8595920721c760d6ca9d49d1d4c39e3c1c558f0b74251c9befa44761fc",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "LayerNorm",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "b3da9fefe6be0d4f69a28ba9477a44707c665b98d12c74881e15d98eeeca2077",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "CausalSelfAttention",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "7f71db984870205d1dd8745b96f6ac79fe69b965b8bc361feedf1207f5f3093e",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "MLP",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "9ef9cb5c4911cf2f1c9a33039af03916ffa411825c01d6b1a979dc299349bf21",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "GPTBlock",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "74d3be3fbd18e1379966370a0b0adaf9fabf415cb122bc32992f5df85cc99173",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "CapacityControlGPTBlock",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "c2958f2147bde942db6adbcc09adf830d75bd04e61302c3d5a9c1b68437fb7ae",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "ConstrainedScalar",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "5c9a5765f2cd968d4f4b66eb64fb02a33b2edb552bff370868e7c7d47f9aea0c",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "YuriiFormerLieTrotterBlock",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "bf4af5d1adb53f00141870f5e95cdc83b8ab8655e7d4d90ddf51d50282b5db26",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "GPTModel",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "5f38f7cd48aa50571c2375fa3115e24c0830264ec7dbd642f01bcb7691abccc1",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/core.py",
+      "symbol": "YuriiFormerModel",
+      "original_module": "model.py",
+      "source_sha256": "c5c156483940ad89da039e168b48244c319c3a8011a4018a4b027d42ded32af2",
+      "ast_sha256": "7d537f8f7d4cfd613496731a50253f82a6701edd18d4effdd4b2e383633ecc95",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/softmax.py",
+      "symbol": "NormalizedHBConfig",
+      "original_module": "normalized_hb.py",
+      "source_sha256": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+      "ast_sha256": "0bf1fab99f01e061f41cee85221fa1d49e2410154c541e4dfa0771fb1bfbc772",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/softmax.py",
+      "symbol": "attention_connection",
+      "original_module": "normalized_hb.py",
+      "source_sha256": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+      "ast_sha256": "8dde4b10ffcc0df2c12147831d1087975ccb15f688c5a4cda0973688c835a329",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/softmax.py",
+      "symbol": "NormalizedHBBlock",
+      "original_module": "normalized_hb.py",
+      "source_sha256": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+      "ast_sha256": "8ec4da090ee69e547eedd35d50a511af8d14251850e4f3d5a35b25a847305111",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/softmax.py",
+      "symbol": "NormalizedHBModel",
+      "original_module": "normalized_hb.py",
+      "source_sha256": "83158bcd59ca5eae2a4543f171139be9693128915bb170718af7b49c5cba0b15",
+      "ast_sha256": "179159cc1f458293c05a14ffa420a2b87c837883a44cbf1c4f03be2beefcc458",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "make_model",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "bc3a1e7b810ba6f13942e40ae982847ecfcd120f4fa7ab0fcbdb38335832428e",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "LinearHBConfig",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "91352f3bd72a581a0d53943278d7b35bba69f1fca2bf56c8b7b9c5c17632e263",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "project",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "2de3532bc6a9f1fc31c8e7d75a667721b7be2ebfb3fec0f01580d197920f7bdb",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "merge",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "f0050b9e5d331575974358db809b80e3125d10833f2bb0eb3ed9d5f036ec4f9f",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "linear_force",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "4da70dc78e639296333a95ca17e3085cda56f668c210fcc557158493a8f9d22f",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "_proxy_chunk",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "9d438e7b208b57b5db760b862449027d6479aaf5508b14c8983ae66c4da32840",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "linear_proxy",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "d1cd5b4799645a435daeba2918f9f0d6503eb7ed0865b02c182f59ef3a4c9346",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "LinearAttention",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "bb7f3ea19fed6b1223d37848b1ed5049a2f245dcf474a1ad077be32983fdb4fd",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "LinearGPTModel",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "17d4110f6e3f840dc138421e1fed47ecb86e21f836b1cab45e3279792849267b",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "LinearHBBlock",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "4ae1777e814792932fb7dcf6762f6c1f07b6523275ca3722d0faddfea0f5fcbf",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/linear.py",
+      "symbol": "LinearHBModel",
+      "original_module": "linear_hb_model.py",
+      "source_sha256": "68d1f799b595b9b1097163f834843c459062bc4396b09fa6980c1ef7b0a8da7c",
+      "ast_sha256": "2fcd79e9faac7bafe1a53f41f066c8404d964a4854e9be1ece58ad10cd2657c0",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/optim.py",
+      "symbol": "configure_precision",
+      "original_module": "train.py",
+      "source_sha256": "d825d93460c49492121497392877c3807c384b5695a83066b1119c9fa24c4213",
+      "ast_sha256": "ed32410beca87943f0dc3ec68788e55f68464eaad7c335c6eaa3b94c0f907327",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/optim.py",
+      "symbol": "cosine_lr",
+      "original_module": "train.py",
+      "source_sha256": "d825d93460c49492121497392877c3807c384b5695a83066b1119c9fa24c4213",
+      "ast_sha256": "a99f8b8a78b2cd71658e17218721f7401c5b1a5df90924d1d08c6055721fbef1",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/optim.py",
+      "symbol": "MixedOptimizer",
+      "original_module": "train.py",
+      "source_sha256": "d825d93460c49492121497392877c3807c384b5695a83066b1119c9fa24c4213",
+      "ast_sha256": "dfbbf574e9d10d3215aaead1e9ee82db6575c68aacc466ef3462e97abd206246",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/optim.py",
+      "symbol": "initialize_learned_v0_tables",
+      "original_module": "train.py",
+      "source_sha256": "d825d93460c49492121497392877c3807c384b5695a83066b1119c9fa24c4213",
+      "ast_sha256": "22dff8c4aa7925a6cedc7ce6b4d15b095b3f47938d505ecb23fb136b13ababfb",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/optim.py",
+      "symbol": "_parameter_buckets",
+      "original_module": "train.py",
+      "source_sha256": "d825d93460c49492121497392877c3807c384b5695a83066b1119c9fa24c4213",
+      "ast_sha256": "14bd24bda215204a0f4b256f517aa10fe26c9f4dcf09904ffe8375ede5102a63",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/optim.py",
+      "symbol": "build_optimizer",
+      "original_module": "train.py",
+      "source_sha256": "d825d93460c49492121497392877c3807c384b5695a83066b1119c9fa24c4213",
+      "ast_sha256": "2ddf984483480c10a1bb24dbb260aa99c22e09631372420fe7e9ad283d3480b8",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/looped.py",
+      "symbol": "_norm",
+      "original_module": "looped_hb_model.py",
+      "source_sha256": "cde67a33e3ea56e0d36f884bef288d91012f0219b71614e74613188924bd2c20",
+      "ast_sha256": "6aaa834007f8b2c791728e5aac2b4af247439adf0afff4ab5bcc68e28471c2e7",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/looped.py",
+      "symbol": "_cosine",
+      "original_module": "looped_hb_model.py",
+      "source_sha256": "cde67a33e3ea56e0d36f884bef288d91012f0219b71614e74613188924bd2c20",
+      "ast_sha256": "90f7d10fe506e913c157678b1c821c18c1a371c4dcd98533f0c83ac846a6fd44",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/looped.py",
+      "symbol": "LoopedDecoder",
+      "original_module": "looped_hb_model.py",
+      "source_sha256": "cde67a33e3ea56e0d36f884bef288d91012f0219b71614e74613188924bd2c20",
+      "ast_sha256": "98ce18e408778c7f2c08cb7877131fa38cef73dfe858a3fbc9acc26dc8036580",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/sharing.py",
+      "symbol": "LayoutDecoder",
+      "original_module": "looping_replication_model.py",
+      "source_sha256": "46af94e33a61f7f289f65c0e7a6a80e53b5f3bd51fa9592784592e776893f57f",
+      "ast_sha256": "7754d0a7cc5acb98bd9190339ecd6237e498b227fc1f3feb9544427c67a772d7",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "MobilityConfig",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "abf3a6a1826e2ea0e2a7bbdc88f01c720f5a89c5852aa2af00e707d18d9df7ef",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "merge",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "1a1a053b656aad3ed2d2e6191a9dd8a0eea3843be072cfaa2cdb7a74950b0bdd",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "split",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "155067bfde556636e7243502d0566cc4e87c5263bb7f31149805926916226045",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "project",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "419232cd7aea2679f890f0373b957ac2348686920d4d6488f2cd9706f3be8df6",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "direction_project",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "c851128dddcb1f99a34cf2a8ff3057d135ed3a310883746101b5167b05dc6859",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "geometry",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "c84cef6118d1e892ba46ecc0d58ff9c26555613a3cca51ba7371a7e05687d851",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "weights",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "8027c6dc78cdd61eff93a38a4ae7e136ca332cfbf3778532e685ee7350d36b72",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "tensor_metric",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "83e4a03cbce9e6a1e1dacf6c490f00f9eb3702959bd2f434d2f1070909a794c6",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "native_l2_connection",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "33355a212c54265a689bd4b82c32a69d386c0f3c7563ff1c1051bc6fa19c5387",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "MobilityAttention",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "15527e84a632da9320e5e3e11ab8740afb701877eccbb3cb44e62def3c4c352e",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "MobilityBlock",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "eb1340acb9aec4c891e0dac7b73aac55ddf837044f5206f94382871ed4c60cdd",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "MobilityModel",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "968063b682e5fadd67cbb2877a5e92edd6a588be230efd43423e8b51dddda615",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "dynamics",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "2f3c5b6a95bc28a1e213902069cf457f937964f1484e51677fd7b2caff9ede07",
+      "method": "verbatim numerical definition; imports relocated"
+    },
+    {
+      "public_module": "sympformer/mobility.py",
+      "symbol": "make_model",
+      "original_module": "mobility_attention_model.py",
+      "source_sha256": "62579647d775671592b923d4a8f5c4ee35b48508b0fab686336bacdb6583bf8f",
+      "ast_sha256": "fe7764fc8549b5424c944d19e8a3be38244b33371b3d3d7df4ed0533a1903df0",
+      "method": "verbatim numerical definition; imports relocated"
+    }
+  ],
+  "relocations": "Import paths only; mathematical AST bodies unchanged. Nonlinear registry restricted to two reported families. Public training orchestration is new and separately tested."
+}

@@ -1,87 +1,106 @@
-# SympFormer
+# SympFormer — submitted-paper experiments
 
-Reproducible code for geometry-inspired, strictly causal language-model updates.
+Minimal code to repeat the **three numerical tables in the submitted
+`arxiv_v4.tex`**, identified by Overleaf commit
+`c9ce8f42152e942b8ed80f55f480677ab5c0a04e` (October 22, 2026).
+The manuscript is maintained separately; this repository contains no manuscript,
+private research records, cluster controllers, results or checkpoints.
 
-## Current paper experiments (arxiv_v4)
+| Study (`--study`) | Methods | Datasets | Seeds | Cells |
+|---|---|---|---:|---:|
+| `softmax` | B / Y / H0 / H1 / R2 | TinyStories + OpenWebText | 5 each | 50 |
+| `sharing` | Same five, tied + untied | Both | 10 each | 200 |
+| `linear` | Same five, signed prefix-linear attention | Both | 3 each | 30 |
+| `sigmoid` | Same five, normalized sigmoid | Both | 3 each | 30 |
+| `native_l2` | Same five, native-L2 SPD proxy | Both | 3 each | 30 |
 
-**Start with [`paper_v4/README.md`](paper_v4/README.md).** This is the implementation
-map for the current manuscript's *Discretizations and numerical results* and
-*Implementation details* sections (synchronized October 5, 2026).
+Every cell trains **99,991,552 tokens**. The deferred 1B-token study and unreported
+look-ahead/width/strength/shape/particle experiments are deliberately excluded.
+**H0 is not vanilla B.** These are causal, geometry-inspired decoders, not exact
+Hamiltonian solvers. Benefit and cost are conditional; no universal correction,
+sharing-amplification or equal-compute advantage is implied.
 
-The paper compares:
+- [Exact protocols and reproduction limits](docs/REPRODUCIBILITY.md)
+- [Connection proxies: softmax, sigmoid, signed linear and native-L2](docs/CONNECTION_PROXIES.md)
+- [Numerical source lineage](docs/SOURCE_PROVENANCE.json)
 
-- **B:** native residual attention/MLP Transformer, not a momentum control;
-- **Y:** Yuriiformer with learned initial velocity and attention/MLP look-ahead;
-- **H0:** attention look-ahead disabled, MLP look-ahead retained;
-- **H1:** coordinate connection-proxy correction;
-- **R2:** half-corrected position and fully corrected velocity, both using the
-  shared velocity LayerNorm;
-- the explicitly separate attention-look-ahead variants and signed-linear
-  attention counterparts.
+## Setup and data
 
-The implemented connection is a **causal multi-head proxy**, not an established
-Levi--Civita connection of the complete normalized decoder. R2 does not imply
-second-order accuracy of the full layer or exact symplecticity.
-
-### Quick start
-
-Use [uv](https://docs.astral.sh/uv/) for the environment:
-
-```bash
-uv sync --frozen
-uv run python paper_v4/verify.py --out /tmp/sympformer-v4-checks
-uv run python paper_v4/run.py --list
-```
-
-Generate GPT-2-tokenized `uint16` data with manifest sidecars, outside the repo:
+Use `uv`; the checked-in lock supplies dependencies, including PyTorch2.13.0.
+The historical CUDA cohort additionally used Python3.11.13 and
+PyTorch2.13.0+cu130; see the protocol document before comparing GPU timings.
 
 ```bash
+uv sync --frozen --python 3.11
+uv run python -m unittest discover -s tests -v
+
+# Use storage outside this checkout. These commands download full datasets.
 uv run python preprocess_tinystories.py --out_dir "$DATA_DIR" --seed 1337
 uv run python process_openwebtext.py --out_dir "$DATA_DIR" --seed 1337 --val_fraction 0.005
 ```
 
-Preview a paper run, then add `--execute` to train in your allocated environment:
+Training verifies the paper's four corpus SHA-256/size records in
+`configs/data_fingerprints.json` plus preprocessing manifest sidecars. A changed
+upstream dataset is a mismatch, not permission to silently use a new split.
+Data are not redistributed. This repository does not promise that a mutable
+upstream dataset revision will always regenerate the historical bytes.
+
+## Enumerate, train and resume
 
 ```bash
-uv run python paper_v4/run.py \
-  --config configs/softmax_primary/R2_tinystories_s70020.json \
-  --data-dir "$DATA_DIR" --out-dir "$OUTPUT_DIR" --device cuda
+# Exactly340 cells, no scheduler actions:
+uv run python run.py --list
+uv run python run.py --study sharing --index 0       # protocol preview only
+
+# Explicit execution; one cell on one allocated GPU:
+uv run python run.py --study sharing --index 0 --execute \
+  --data-dir "$DATA_DIR" --out-dir "$RUNS/sharing/0" --device cuda
+
+# Resume only a trusted own checkpoint into a NEW directory, with the SAME preset:
+uv run python run.py --study sharing --index 0 --execute \
+  --data-dir "$DATA_DIR" --out-dir "$RUNS/sharing/0-resumed" --device cuda \
+  --resume "$RUNS/sharing/0/checkpoint.pt"
 ```
 
-Presets use FP32 without TF32 and AdamW, not the older root-level bfloat16/Muon
-campaign defaults. All paper studies here are approximately **100M-token
-scale-local diagnostics**. Equal tokens do not mean equal parameters or compute.
-The completed width256/100M tied-versus-untied looping study is included in the
-latest v4 section. The prospective 1B-token campaign is separate and is not
-presented as a completed paper result here.
+Choose the proper number of cells from the table above. There are no cluster
+paths, resource submissions or automatic retries in the code. Run scheduling and
+compute authorization are your responsibility. Use paired hardware/software
+cohorts and one GPU per independent cell; do not split methods across GPU types.
+Do not include both an interrupted and its resumed replacement as two seeds.
+Only a complete full-horizon run supplies a final NLL; best checkpoints do not.
 
-## Results and interpretation
+Outputs: `run_manifest.json`, `metrics.csv`, `damping.csv`, `summary.json` and
+trusted model/optimizer/RNG/iterator checkpoint state. Incomplete/failed runs are
+not silently averaged. CPU fixtures are correctness tests, not paper results.
 
-At width64/context128/five seeds, softmax R2 has the lowest descriptive mean NLL
-on both datasets. Its matched H0 differences are **not significant under the
-reported paired tests**; improvement over full Y alone is not isolated correction
-attribution. In the context512/three-seed linear study, R2 improves on the linear
-residual baseline on OpenWebText, but neither correction passes the original
-Holm20 family against H0. See the protocol-specific tables and limitations in
-[`paper_v4/README.md`](paper_v4/README.md); never pool these studies.
+## Aggregate and plot
 
-## Repository layout
+```bash
+# Each directory must contain the COMPLETE study, both datasets and all seeds:
+uv run python analyze.py --study sharing --runs "$RUNS/sharing" --out "$ANALYSIS/sharing"
+uv run python plot.py --study sharing --runs "$RUNS/sharing" --out "$ANALYSIS/sharing-plots"
+```
 
-| Path | Purpose |
-|---|---|
-| `paper_v4/` | Reviewed frozen runtimes, explicit presets, correctness checks and plotting for current paper experiments |
-| `model.py`, `train.py`, `data.py` | Earlier general experimental implementations; not the v4 protocol entry point |
-| `scripts/` | Earlier verification/analysis/particle utilities |
-| `configs/` | Earlier pilot/core presets; not interchangeable with `paper_v4/configs/` |
-| `particle_schemes.py`, `particle_acceleration_benchmark.py` | Particle-system diagnostics, not decoder benchmarks |
+Analysis reports mean/sample SD, parameters and peak memory. GPU hours require
+an external per-run `allocation.json` containing `gpu_count`, `allocated_seconds`
+and `gpu` (the GPU name in the run manifest). **Trainer elapsed time is not a
+substitute for allocated GPU time.** Without complete allocation records, GPUh
+is reported as unavailable. No table result is hardcoded as training output.
 
-The v4 runtimes are isolated so older checkpoints and experimental paths remain
-available without silently changing their meaning. The snapshots share byte-identical
-core modules through relative symlinks. Use a symlink-capable checkout (Linux/macOS).
-Historical global-Hamiltonian, PE and old linear-discretization routes are distinct
-from the architectures and protocols documented for v4.
+Plots use exact common evaluation iterations, log-y NLL, seed variability and
+all logical layers' coefficients/gains/unit steps/nominal damping. They export
+PDF+PNG and raw/plotted CSV, with descriptive fitted `r/t+c` versus `3/t`.
+Native B damping is marked not applicable. No smoothing, interpolation, best-seed
+selection or post-hoc significance tests are performed.
 
-Checkpoints are trusted pickle inputs: load only your own or independently trusted
-files. Datasets, checkpoints, raw runs, logs, research notes, manuscripts and job
-scripts are not distributed as part of this update. No cluster credentials or
-cluster-specific launch instructions are required by the paper entry point.
+## Repository scope
+
+`configs/` contains the five exact scientific matrices and corpus fingerprints;
+`sympformer/` contains only the required causal models and training primitives;
+`tests/` checks equations, gradients, causality, parameter counts and exact tiny
+CPU interruption/resume; the two preprocessing utilities prepare the data.
+`run.py`, `analyze.py`, and `plot.py` are portable public orchestration, not the
+private historical scheduler/auditor. Original model/proxy definitions are
+preserved; file schemas and resource bookkeeping are new. A fresh full GPU
+reproduction has **not** been performed for this release. Timing remains
+hardware/storage-dependent and must be measured, not copied from the paper.
