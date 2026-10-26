@@ -419,5 +419,18 @@
       "method": "verbatim numerical definition; imports relocated"
     }
   ],
-  "relocations": "Import paths only; mathematical AST bodies unchanged. Nonlinear registry restricted to two reported families. Public training orchestration is new and separately tested."
+  "relocations": "Import paths only; mathematical AST bodies unchanged. Nonlinear registry restricted to two reported families. Public training orchestration is new and separately tested.",
+  "paper": {
+    "title": "SympFormer: Inertial Attention Blocks from Damped Hamiltonian Dynamics on Spaces of Probability Measures",
+    "authors": [
+      "Viktor Stein",
+      "Levin Maier",
+      "Wuchen Li",
+      "Gabriele Steidl"
+    ],
+    "arxiv_id": "2610.31600",
+    "version": "v1",
+    "submitted": "2026-10-22",
+    "url": "https://arxiv.org/abs/2610.31600v1"
+  }
 }

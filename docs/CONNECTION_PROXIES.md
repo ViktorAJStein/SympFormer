@@ -1,4 +1,7 @@
-# Connection proxies used in the submitted experiments
+# Connection proxies used in SympFormer
+
+Companion implementation specification for
+[SympFormer, arXiv:2610.31600v1](https://arxiv.org/abs/2610.31600v1).
 
 This document specifies **the executed causal proxies**, not a claim that they
 are the Levi–Civita connection of a whole LayerNorm/multi-head language model.

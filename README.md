@@ -1,10 +1,18 @@
-# SympFormer — submitted-paper experiments
+# SympFormer
 
-Minimal code to repeat the **three numerical tables in the submitted
-`arxiv_v4.tex`**, identified by Overleaf commit
-`c9ce8f42152e942b8ed80f55f480677ab5c0a04e` (October 22, 2026).
-The manuscript is maintained separately; this repository contains no manuscript,
-private research records, cluster controllers, results or checkpoints.
+[![arXiv](https://img.shields.io/badge/arXiv-2610.31600-b31b1b.svg)](https://arxiv.org/abs/2610.31600)
+
+Code for **[SympFormer: Inertial Attention Blocks from Damped Hamiltonian Dynamics on Spaces of Probability Measures](https://arxiv.org/abs/2610.31600)**
+
+Viktor Stein, Levin Maier, Wuchen Li and Gabriele Steidl — arXiv, 2026.
+
+**[Paper](https://arxiv.org/abs/2610.31600)** · **[PDF](https://arxiv.org/pdf/2610.31600)** ·
+**[Connection proxies](docs/CONNECTION_PROXIES.md)** · **[Reproduction guide](docs/REPRODUCIBILITY.md)**
+
+This repository provides the causal decoder implementations and protocols for
+all **three numerical tables in [arXiv v1](https://arxiv.org/abs/2610.31600v1)**
+(submitted October 22, 2026). It contains code and configurations, not manuscript
+sources, private research records, cluster controllers, results or checkpoints.
 
 | Study (`--study`) | Methods | Datasets | Seeds | Cells |
 |---|---|---|---:|---:|
@@ -92,6 +100,26 @@ all logical layers' coefficients/gains/unit steps/nominal damping. They export
 PDF+PNG and raw/plotted CSV, with descriptive fitted `r/t+c` versus `3/t`.
 Native B damping is marked not applicable. No smoothing, interpolation, best-seed
 selection or post-hoc significance tests are performed.
+
+## Citation
+
+If you use this code or build on the paper, please cite:
+
+```bibtex
+@article{stein2026sympformer,
+  title = {SympFormer: Inertial Attention Blocks from Damped Hamiltonian Dynamics on Spaces of Probability Measures},
+  author = {Stein, Viktor and Maier, Levin and Li, Wuchen and Steidl, Gabriele},
+  journal = {arXiv preprint arXiv:2610.31600},
+  year = {2026},
+  eprint = {2610.31600},
+  archivePrefix = {arXiv},
+  primaryClass = {math.SG},
+  url = {https://arxiv.org/abs/2610.31600}
+}
+```
+
+GitHub's **Cite this repository** action also points to the paper through
+[`CITATION.cff`](CITATION.cff).
 
 ## Repository scope
 

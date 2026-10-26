@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the SympFormer paper below."
+type: software
+title: "SympFormer"
+authors:
+  - family-names: "Stein"
+    given-names: "Viktor"
+repository-code: "https://github.com/ViktorAJStein/SympFormer"
+url: "https://github.com/ViktorAJStein/SympFormer"
+preferred-citation:
+  type: article
+  title: "SympFormer: Inertial Attention Blocks from Damped Hamiltonian Dynamics on Spaces of Probability Measures"
+  authors:
+    - family-names: "Stein"
+      given-names: "Viktor"
+    - family-names: "Maier"
+      given-names: "Levin"
+    - family-names: "Li"
+      given-names: "Wuchen"
+    - family-names: "Steidl"
+      given-names: "Gabriele"
+  journal: "arXiv"
+  year: 2026
+  date-published: "2026-10-22"
+  url: "https://arxiv.org/abs/2610.31600"
+  identifiers:
+    - type: other
+      value: "arXiv:2610.31600"
+      description: "arXiv preprint identifier"

@@ -1,8 +1,12 @@
-# Exact submitted-paper experiment protocols
+# Reproducing the arXiv paper
 
-The specification is the numerical section and implementation appendix of
-Overleaf `arxiv_v4.tex` at `c9ce8f42152e942b8ed80f55f480677ab5c0a04e`.
-The 1B-token addition is deferred and absent from this submitted source.
+These protocols reproduce the numerical section and implementation appendix of
+[SympFormer, arXiv:2610.31600v1](https://arxiv.org/abs/2610.31600v1), submitted
+October 22, 2026, by Viktor Stein, Levin Maier, Wuchen Li and Gabriele Steidl.
+The numerical source snapshot is Overleaf commit
+`c9ce8f42152e942b8ed80f55f480677ab5c0a04e`; its provenance is retained in
+[`SOURCE_PROVENANCE.json`](SOURCE_PROVENANCE.json).
+The 1B-token addition is deferred and absent from arXiv v1.
 Configuration indices are local to the selected JSON matrix; `run.py --list`
 shows the exact method/dataset/seed/layout mapping. There are340 distinct cells,
 not a newly authorized campaign.
